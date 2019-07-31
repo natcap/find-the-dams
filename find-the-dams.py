@@ -52,7 +52,8 @@ def initalize_database(database_path):
             lat_min REAL NOT NULL,
             lng_min REAL NOT NULL,
             lat_max REAL NOT NULL,
-            lng_max REAL NOT NULL);
+            lng_max REAL NOT NULL,
+            UNIQUE(lat_min, lng_min, lat_max, lng_max));
 
         CREATE UNIQUE INDEX IF NOT EXISTS sa_lat_min_idx
         ON spatial_analysis_units (lat_min);
@@ -92,6 +93,18 @@ def initalize_database(database_path):
     connection.commit()
 
 
+def initalize_spatial_search_units(database_path):
+    """Used to set the initial spatial search units in the database."""
+    spatial_analysis_unit_list = []
+    connection = sqlite3.connect(database_path)
+    cursor = connection.cursor()
+    cursor.executemany(
+        '''INSERT INTO spatial_analysis_units(
+            id, state, lat_min, lng_min, lat_max, lng_max)
+           VALUES(?, ?, ?, ?, ?, ?)''', spatial_analysis_unit_list)
+    pass
+
+
 def main():
     """Entry point."""
     try:
@@ -99,6 +112,7 @@ def main():
     except OSError:
         pass
     initalize_database(DATABASE_PATH)
+    initalize_spatial_search_units(DATABASE_PATH)
     APP.run(host='0.0.0.0', port=8080)
 
 
