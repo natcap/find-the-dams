@@ -39,7 +39,7 @@ def index():
 
 def main():
     """Entry point."""
-    APP.run(host='0.0.0.0', port=8888)
+    APP.run(host='0.0.0.0', port=8080)
 
 
 if __name__ == '__main__':
