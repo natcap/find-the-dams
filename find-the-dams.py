@@ -31,7 +31,10 @@ def favicon():
 @APP.route('/')
 def index():
     """Flask entry point."""
-    return 'hi'
+    return flask.render_template(
+            'dashboard.html', **{
+                'message': 'Stats will go here.',
+            })
 
 
 def main():
