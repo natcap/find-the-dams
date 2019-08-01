@@ -200,8 +200,8 @@ def initalize_spatial_search_units(database_path):
             grid_geom = shapely.geometry.box(lng, lat, lng+1, lat+1)
             if global_polygon_prep.intersects(grid_geom):
                 spatial_analysis_unit_list.append(
-                    spatial_analysis_id, 'unscheduled',
-                    lat, lng, lat+1, lng+1)
+                    (spatial_analysis_id, 'unscheduled',
+                     lat, lng, lat+1, lng+1))
 
     connection = sqlite3.connect(database_path)
     cursor = connection.cursor()
