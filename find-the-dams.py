@@ -36,10 +36,12 @@ LOGGER = logging.getLogger(__name__)
 
 WORKSPACE_DIR = 'workspace'
 DATABASE_PATH = os.path.join(WORKSPACE_DIR, 'find-the-dams.db')
-N_WORKERS = -1
+
+DATABASE_STATUS_STR = None
 
 APP = Flask(__name__, static_url_path='', static_folder='')
 APP.config['SECRET_KEY'] = b'\xe2\xa9\xd2\x82\xd5r\xef\xdb\xffK\x97\xcfM\xa2WH'
+
 
 
 @APP.route('/favicon.ico')
@@ -62,11 +64,36 @@ def index():
 @APP.route('/processing_status/', methods=['POST'])
 def processing_status():
     """Return results about polygons that are processing."""
-    LOGGER.debug('processing_status')
+    LOGGER.debug(DATABASE_STATUS_STR)
     result = json.dumps({
-        'data': str(datetime.datetime.now()),
+        'query_time': 'init',
+        'n_units': 'init',
+    })
+
+    if DATABASE_STATUS_STR is not None:
+        return json.dumps({
+            'query_time': DATABASE_STATUS_STR,
+            'n_units': DATABASE_STATUS_STR,
         })
-    return result
+    try:
+        database_uri = 'file:%s?mode=ro' % DATABASE_PATH
+        connection = sqlite3.connect(database_uri, uri=True)
+        cursor = connection.cursor()
+        cursor.execute("SELECT count(id) from spatial_analysis_units;")
+        (n_units,) = cursor.fetchone()
+        cursor.close()
+        connection.commit()
+        result = json.dumps({
+            'query_time': str(datetime.datetime.now()),
+            'n_units': n_units,
+            })
+    except Exception as e:
+        result = result = json.dumps({
+            'query_time': str(e),
+            'n_units': str(e),
+            })
+    finally:
+        return result
 
 
 def initalize_spatial_search_units(database_path, complete_token_path):
@@ -123,7 +150,8 @@ def initalize_spatial_search_units(database_path, complete_token_path):
         CREATE UNIQUE INDEX id_dam_id_idx
         ON identified_dams (dam_id);
         """)
-    LOGGER.debug('create database tables and indexes')
+    global DATABASE_STATUS_STR
+    DATABASE_STATUS_STR = 'create database tables and indexes'
     connection = sqlite3.connect(database_path)
     cursor = connection.cursor()
     cursor.executescript(create_database_sql)
@@ -132,9 +160,9 @@ def initalize_spatial_search_units(database_path, complete_token_path):
 
     dam_bounding_box_bb_path = os.path.join(
         WORKSPACE_DIR, os.path.basename(DAM_BOUNDING_BOX_URL))
-    LOGGER.debug("download validated dam bounding box database")
+    DATABASE_STATUS_STR = "download validated dam bounding box database"
     urllib.request.urlretrieve(DAM_BOUNDING_BOX_URL, dam_bounding_box_bb_path)
-    LOGGER.debug("parse dam bounding box database for valid dams")
+    DATABASE_STATUS_STR = "parse dam bounding box database for valid dams"
     try:
         connection = sqlite3.connect(dam_bounding_box_bb_path)
         cursor = connection.cursor()
@@ -172,7 +200,7 @@ def initalize_spatial_search_units(database_path, complete_token_path):
         cursor.close()
         connection.commit()
 
-    LOGGER.debug("insert valid validated dams into `identified_dams` table")
+    DATABASE_STATUS_STR = "insert valid validated dams into `identified_dams` table"
     connection = sqlite3.connect(database_path)
     cursor = connection.cursor()
     cursor.executemany(
@@ -183,12 +211,12 @@ def initalize_spatial_search_units(database_path, complete_token_path):
     connection.commit()
 
     # define the spatial search units
-    LOGGER.debug("download download global polygon")
+    DATABASE_STATUS_STR = "download download global polygon"
     global_polygon_path = os.path.join(
         WORKSPACE_DIR, os.path.basename(GLOBAL_POLYGON_URL))
     urllib.request.urlretrieve(GLOBAL_POLYGON_URL, global_polygon_path)
 
-    LOGGER.debug("convert global polygon to shapely geometry")
+    DATABASE_STATUS_STR = "convert global polygon to shapely geometry"
     global_polygon_vector = gdal.OpenEx(global_polygon_path, gdal.OF_VECTOR)
     global_polygon_layer = global_polygon_vector.GetLayer()
     global_polygon_list = [
@@ -222,6 +250,7 @@ def initalize_spatial_search_units(database_path, complete_token_path):
 
     with open(complete_token_path, 'w') as token_file:
         token_file.write(str(datetime.datetime.now()))
+    DATABASE_STATUS_STR = None
 
 
 def main():

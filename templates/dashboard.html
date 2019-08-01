@@ -100,7 +100,9 @@
             data: JSON.stringify({'foo': 'bar'}),
             success: function (data) {
                 data_json = JSON.parse(data);
-                $('#status').html(data_json['data']);
+                $('#status').html(
+                    '<p>'+data_json['query_time']+'</p><p>n_units: '+
+                    data_json['n_units']+'</p>');
             }
         }).fail(function(data) {
             $('#status').html('error: ' + JSON.stringify(data));
