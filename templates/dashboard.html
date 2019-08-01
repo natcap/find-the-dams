@@ -53,17 +53,6 @@
         padding: 5px;
         width: 301px;
     }
-    #mouse_tip {
-        position: absolute;
-        float: left;
-        z-index: 1000;
-        width: 100px;
-        font-size: small;
-        background-color: rgba(200, 50, 50, 0.2);
-        color: rgb(255, 255, 255);
-        text-align: center;
-        border: 1px solid black;
-    }
     div.leaflet-control-minimap {
         border: 1px solid white;
     }
@@ -78,7 +67,7 @@
             <img src="images/natcap.png"/> & Summary Stats
         </strong></span>
         <hr>
-        <div id="stats">
+        <div id="status">
             <p>{{ message }}</p>
         </div>
     </div>
@@ -106,38 +95,21 @@
             },
         }).addTo(map);
 
-    function fetch_from_server() {
-        $.ajax({
-            url: '/stats',
-            type: 'GET',
-            error: function (request, status, error) {
-                console.log(request.responseText);
-                console.log(status);
-                console.log(error);
-            },
+    function update_processing_status() {
+        $.post({
+            url: '/processing_status',
+            data: JSON.stringify({'foo': 'bar'}),
             success: function (data) {
                 data_json = JSON.parse(data);
-                var any_data = false;
-                var content="";
-                $.each(
-                    data_json,
-                    function(username, count_time_tuple) {
-                        content += (
-                            '<b>'+username+'</b>('+count_time_tuple[0]+'), ');
-                        any_data = true;
-                });
-                if (any_data) {
-                    content = content.substring(0, content.length-2)
-                    content += "</table>";
-                    $('#active_users').html(content);
-                } else {
-                    $('#active_users').html('');
-                }
+                $('#status').html(data_json['data']);
             }
+        }).fail(function(data) {
+            $('#status').html('error: ' + JSON.stringify(data));
         });
     };
-    get_active_users();
-    setInterval(get_active_users, 5000);
+
+    update_processing_status();
+    setInterval(update_processing_status, 1000);
 
 </script>
 </html>
