@@ -8,6 +8,10 @@ import os
 import sys
 import logging
 
+from osgeo import gdal
+import shapely.prepared
+import shapely.ops
+import shapely.wkb
 import taskgraph
 from flask import Flask
 import flask
@@ -21,7 +25,11 @@ logging.basicConfig(
 logging.getLogger('taskgraph').setLevel(logging.INFO)
 
 DAM_BOUNDING_BOX_URL = (
-    'https://storage.googleapis.com/natcap-natgeo-dam-ecoshards/dams_database_md5_7acdf64cd03791126a61478e121c4772.db')
+    'https://storage.googleapis.com/natcap-natgeo-dam-ecoshards/'
+    'dams_database_md5_7acdf64cd03791126a61478e121c4772.db')
+GLOBAL_POLYGON_URL = (
+    'https://storage.googleapis.com/natcap-natgeo-dam-ecoshards/'
+    'global_polygon_valid_md5_d1d71564442d850c8b1884e79e519d8f.gpkg')
 LOGGER = logging.getLogger(__name__)
 
 WORKSPACE_DIR = 'workspace'
@@ -104,6 +112,7 @@ def initalize_spatial_search_units(database_path):
     task_graph = taskgraph.TaskGraph(WORKSPACE_DIR, N_WORKERS, 30.0)
     dam_bounding_box_bb_path = os.path.join(
         WORKSPACE_DIR, os.path.basename(DAM_BOUNDING_BOX_URL))
+    LOGGER.debug("download validated dam bounding box database")
     task_graph.add_task(
         func=urllib.request.urlretrieve,
         args=(DAM_BOUNDING_BOX_URL, dam_bounding_box_bb_path),
@@ -112,6 +121,7 @@ def initalize_spatial_search_units(database_path):
     # get all the original data processed
     task_graph.join()
 
+    LOGGER.debug("parse dam bounding box database for valid dams")
     try:
         connection = sqlite3.connect(dam_bounding_box_bb_path)
         cursor = connection.cursor()
@@ -149,12 +159,56 @@ def initalize_spatial_search_units(database_path):
         cursor.close()
         connection.commit()
 
+    LOGGER.debug("insert valid validated dams into `identified_dams` table")
     connection = sqlite3.connect(database_path)
     cursor = connection.cursor()
     cursor.executemany(
         'INSERT OR IGNORE INTO identified_dams( '
         'dam_id, pre_known, dam_description, lat_min, lng_min, lat_max, '
         'lng_max) VALUES(?, ?, ?, ?, ?, ?, ?)', spatial_analysis_unit_list)
+    cursor.close()
+    connection.commit()
+
+    # define the spatial search units
+    LOGGER.debug("download download global polygon")
+    global_polygon_path = os.path.join(
+        WORKSPACE_DIR, os.path.basename(GLOBAL_POLYGON_URL))
+    task_graph.add_task(
+        func=urllib.request.urlretrieve,
+        args=(GLOBAL_POLYGON_URL, global_polygon_path),
+        target_path_list=[global_polygon_path],
+        task_name='download global polygon')
+    task_graph.join()
+
+    LOGGER.debug("convert global polygon to shapely geometry")
+    global_polygon_vector = gdal.OpenEx(global_polygon_path, gdal.OF_VECTOR)
+    global_polygon_layer = global_polygon_vector.GetLayer()
+    global_polygon_list = [
+        shapely.wkb.loads(feature.GetGeometryRef().ExportToWkb())
+        for feature in global_polygon_layer]
+    LOGGER.debug("unary union global polygon geometry")
+    global_polygon = shapely.ops.unary_union(global_polygon_list)
+    LOGGER.debug("build spatial index")
+    global_polygon_prep = shapely.prepared.prep(global_polygon)
+
+    spatial_analysis_unit_list = []
+    spatial_analysis_id = 0
+    # 84N to 56S lat because that's what I eyed as the continent coverage
+    for lat in range(-56, 85):
+        LOGGER.debug('processing lat %d', lat)
+        for lng in range(-180, 180):
+            grid_geom = shapely.geometry.box(lng, lat, lng+1, lat+1)
+            if global_polygon_prep.intersects(grid_geom):
+                spatial_analysis_unit_list.append(
+                    spatial_analysis_id, 'unscheduled',
+                    lat, lng, lat+1, lng+1)
+
+    connection = sqlite3.connect(database_path)
+    cursor = connection.cursor()
+    cursor.executemany(
+        'INSERT OR IGNORE INTO spatial_analysis_units( '
+        'id, state, lat_min, lng_min, lat_max, lng_max) '
+        'VALUES(?, ?, ?, ?, ?, ?)', spatial_analysis_unit_list)
     cursor.close()
     connection.commit()
 
