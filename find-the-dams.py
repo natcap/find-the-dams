@@ -152,7 +152,7 @@ def initalize_spatial_search_units(database_path):
     connection = sqlite3.connect(database_path)
     cursor = connection.cursor()
     cursor.executemany(
-        'INSERT INTO identified_dams( '
+        'INSERT OR IGNORE INTO identified_dams( '
         'dam_id, pre_known, dam_description, lat_min, lng_min, lat_max, '
         'lng_max) VALUES(?, ?, ?, ?, ?, ?, ?)', spatial_analysis_unit_list)
     cursor.close()
