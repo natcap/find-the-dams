@@ -1,6 +1,6 @@
 # coding=UTF-8
 """Module to process remote dam detection imagery."""
-import timedate
+import datetime
 import json
 import ast
 import urllib
@@ -9,6 +9,7 @@ import os
 import sys
 import logging
 
+import taskgraph
 from osgeo import gdal
 import shapely.prepared
 import shapely.ops
@@ -56,6 +57,16 @@ def index():
             'dashboard.html', **{
                 'message': 'Stats will go here.',
             })
+
+
+@APP.route('/processing_status/', methods=['POST'])
+def processing_status():
+    """Return results about polygons that are processing."""
+    LOGGER.debug('processing_status')
+    result = json.dumps({
+        'data': str(datetime.datetime.now()),
+        })
+    return result
 
 
 def initalize_spatial_search_units(database_path, complete_token_path):
@@ -112,6 +123,7 @@ def initalize_spatial_search_units(database_path, complete_token_path):
         CREATE UNIQUE INDEX id_dam_id_idx
         ON identified_dams (dam_id);
         """)
+    LOGGER.debug('create database tables and indexes')
     connection = sqlite3.connect(database_path)
     cursor = connection.cursor()
     cursor.executescript(create_database_sql)
@@ -209,7 +221,7 @@ def initalize_spatial_search_units(database_path, complete_token_path):
     connection.commit()
 
     with open(complete_token_path, 'w') as token_file:
-        token_file.write(str(timedate.timedate.now()))
+        token_file.write(str(datetime.datetime.now()))
 
 
 def main():
@@ -218,17 +230,17 @@ def main():
         os.makedirs(WORKSPACE_DIR)
     except OSError:
         pass
-    initalize_database(DATABASE_PATH)
     initalize_token_path = os.path.join(
         WORKSPACE_DIR, 'initalize_spatial_search_units.COMPLETE')
-    task_graph = taskgraph.TaskGraph(WORKSPACE_DIR, N_WORKERS, 30.0)
+    task_graph = taskgraph.TaskGraph(WORKSPACE_DIR, 0, 30.0)
     task_graph.add_task(
         func=initalize_spatial_search_units,
-        args=(task_graph, DATABASE_PATH, initalize_token_path),
+        args=(DATABASE_PATH, initalize_token_path),
         target_path_list=[initalize_token_path],
-        task_name='initalize database')
-    task_graph.join()
+        task_name='initialize database')
     APP.run(host='0.0.0.0', port=8080)
+    task_graph.close()
+    task_graph.join()
 
 
 if __name__ == '__main__':
