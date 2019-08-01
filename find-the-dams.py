@@ -14,7 +14,6 @@ from osgeo import gdal
 import shapely.prepared
 import shapely.ops
 import shapely.wkb
-import taskgraph
 from flask import Flask
 import flask
 
@@ -41,7 +40,6 @@ DATABASE_STATUS_STR = None
 
 APP = Flask(__name__, static_url_path='', static_folder='')
 APP.config['SECRET_KEY'] = b'\xe2\xa9\xd2\x82\xd5r\xef\xdb\xffK\x97\xcfM\xa2WH'
-
 
 
 @APP.route('/favicon.ico')
@@ -109,6 +107,7 @@ def initalize_spatial_search_units(database_path, complete_token_path):
         None.
 
     """
+    LOGGER.debug('launching initalize_spatial_search_units')
     create_database_sql = (
         """
         CREATE TABLE spatial_analysis_units (
@@ -152,6 +151,9 @@ def initalize_spatial_search_units(database_path, complete_token_path):
         """)
     global DATABASE_STATUS_STR
     DATABASE_STATUS_STR = 'create database tables and indexes'
+    LOGGER.debug(DATABASE_STATUS_STR)
+    if os.path.exists(database_path):
+        os.remove(database_path)
     connection = sqlite3.connect(database_path)
     cursor = connection.cursor()
     cursor.executescript(create_database_sql)
@@ -160,8 +162,12 @@ def initalize_spatial_search_units(database_path, complete_token_path):
 
     dam_bounding_box_bb_path = os.path.join(
         WORKSPACE_DIR, os.path.basename(DAM_BOUNDING_BOX_URL))
-    DATABASE_STATUS_STR = "download validated dam bounding box database"
-    urllib.request.urlretrieve(DAM_BOUNDING_BOX_URL, dam_bounding_box_bb_path)
+    if not os.path.exists(dam_bounding_box_bb_path):
+        dam_bounding_box_bb_tmp_path = '%s.tmp' % dam_bounding_box_bb_path
+        DATABASE_STATUS_STR = "download validated dam bounding box database"
+        urllib.request.urlretrieve(
+            DAM_BOUNDING_BOX_URL, dam_bounding_box_bb_tmp_path)
+        os.rename(dam_bounding_box_bb_tmp_path, dam_bounding_box_bb_path)
     DATABASE_STATUS_STR = "parse dam bounding box database for valid dams"
     try:
         connection = sqlite3.connect(dam_bounding_box_bb_path)
@@ -214,7 +220,11 @@ def initalize_spatial_search_units(database_path, complete_token_path):
     DATABASE_STATUS_STR = "download download global polygon"
     global_polygon_path = os.path.join(
         WORKSPACE_DIR, os.path.basename(GLOBAL_POLYGON_URL))
-    urllib.request.urlretrieve(GLOBAL_POLYGON_URL, global_polygon_path)
+    if not os.path.exists(global_polygon_path):
+        global_polygon_tmp_path = '%s.tmp' % global_polygon_path
+        urllib.request.urlretrieve(
+            GLOBAL_POLYGON_URL, global_polygon_tmp_path)
+        os.rename(global_polygon_tmp_path, global_polygon_path)
 
     DATABASE_STATUS_STR = "convert global polygon to shapely geometry"
     global_polygon_vector = gdal.OpenEx(global_polygon_path, gdal.OF_VECTOR)
@@ -261,15 +271,15 @@ def main():
         pass
     initalize_token_path = os.path.join(
         WORKSPACE_DIR, 'initalize_spatial_search_units.COMPLETE')
-    task_graph = taskgraph.TaskGraph(WORKSPACE_DIR, 0, 30.0)
+    task_graph = taskgraph.TaskGraph(WORKSPACE_DIR, 0, 5.0)
     task_graph.add_task(
         func=initalize_spatial_search_units,
         args=(DATABASE_PATH, initalize_token_path),
         target_path_list=[initalize_token_path],
         task_name='initialize database')
+    task_graph.join(0)
     APP.run(host='0.0.0.0', port=8080)
     task_graph.close()
-    task_graph.join()
 
 
 if __name__ == '__main__':
