@@ -1,5 +1,6 @@
 # coding=UTF-8
 """Module to process remote dam detection imagery."""
+import pickle
 import datetime
 import json
 import ast
@@ -37,10 +38,15 @@ DATABASE_PATH = os.path.join(WORKSPACE_DIR, 'find-the-dams.db')
 DATABASE_STATUS_STR = None
 STATE_TO_COLOR = {
     'unscheduled': '#666666',
-    'scheduled': '#FF9900',
     'fetching data': '#3300FF',
     'analyzing': '#3333FF',
     'complete': '#33CC00',
+}
+
+NEXT_STATE = {
+    'unscheduled': 'fetching data',
+    'fetching data': 'analyzing',
+    'analyzing': 'complete',
 }
 
 APP = Flask(__name__, static_url_path='', static_folder='')
@@ -59,62 +65,43 @@ def favicon():
 def index():
     """Flask entry point."""
     return flask.render_template(
-            'dashboard.html', **{
-                'message': 'Stats will go here.',
-            })
+        'dashboard.html', **{
+            'message': 'Stats will go here.',
+        })
 
 
 @APP.route('/processing_status/', methods=['POST'])
 def processing_status():
     """Return results about polygons that are processing."""
     try:
-        polygons_to_update = {}
+        last_update_tick = flask.request.form.get('last_update_tick')
         payload = None
+        polygons_to_update = {}
         LOGGER.debug(flask.request.form)
         database_uri = 'file:%s?mode=rw' % DATABASE_PATH
         connection = sqlite3.connect(database_uri, uri=True)
         cursor = connection.cursor()
-        if flask.request.form.get('update_only') == 'false':
-            cursor.execute(
-                "SELECT id, state, lat_min, lng_min, lat_max, lng_max "
-                "FROM spatial_analysis_units;")
-            polygons_to_update = {
-                polygon_id: {
-                    'bounds': [[lat_min, lng_min], [lat_max, lng_max]],
-                    'state': state,
-                    'color': STATE_TO_COLOR[state]
-                } for (
-                    polygon_id, state, lat_min, lng_min, lat_max, lng_max) in
-                cursor.fetchall()
-            }
-        else:
-            cursor.execute(
-                'SELECT id FROM spatial_analysis_units '
-                'ORDER BY RANDOM() LIMIT 1;')
-            (polygon_id,) = cursor.fetchone()
-            cursor.execute(
-                'UPDATE spatial_analysis_units SET state = ? WHERE id = ?',
-                ('scheduled', polygon_id))
-            cursor.execute(
-                'SELECT id, state, lat_min, lng_min, lat_max, lng_max '
-                'FROM spatial_analysis_units WHERE id=?', (polygon_id,))
-            (polygon_id, state, lat_min, lng_min, lat_max, lng_max) = (
-                cursor.fetchone())
-            polygons_to_update = {
-                polygon_id: {
-                    'bounds': [[lat_min, lng_min], [lat_max, lng_max]],
-                    'state': state,
-                    'color': STATE_TO_COLOR[state]
-                }
-            }
+        cursor.execute(
+            "SELECT id, state, lat_min, lng_min, lat_max, lng_max "
+            "FROM spatial_analysis_units;")
+        polygons_to_update = {
+            polygon_id: {
+                'bounds': [[lat_min, lng_min], [lat_max, lng_max]],
+                'state': state,
+                'color': STATE_TO_COLOR[state]
+            } for (
+                polygon_id, state, lat_min, lng_min, lat_max, lng_max) in
+            cursor.fetchall()
+        }
 
         cursor.execute("SELECT count(id) from spatial_analysis_units;")
         (n_processing_units,) = cursor.fetchone()
         payload = json.dumps({
-                'query_time': str(datetime.datetime.now()),
-                'n_processing_units': n_processing_units,
-                'polygons_to_update': polygons_to_update
-            })
+            'last_update_tick': last_update_tick,
+            'query_time': str(datetime.datetime.now()),
+            'n_processing_units': n_processing_units,
+            'polygons_to_update': polygons_to_update
+        })
         cursor.close()
         connection.commit()
     except Exception:
@@ -139,8 +126,16 @@ def initalize_spatial_search_units(database_path, complete_token_path):
     LOGGER.debug('launching initalize_spatial_search_units')
     create_database_sql = (
         """
+        CREATE TABLE update_history (
+            update_tick INTEGER NOT NULL PRIMARY KEY,
+            polygon_id_list BLOB NOT NULL
+        );
+
+        CREATE INDEX update_tick_idx
+        ON update_history (update_tick);
+
         CREATE TABLE spatial_analysis_units (
-            id INTEGER NOT NULL PRIMARY KEY,
+            polygon_id INTEGER NOT NULL PRIMARY KEY,
             state TEXT NOT NULL,
             country_list TEXT NOT NULL,
             lat_min REAL NOT NULL,
@@ -157,7 +152,7 @@ def initalize_spatial_search_units(database_path, complete_token_path):
         CREATE INDEX sa_lng_max_idx
         ON spatial_analysis_units (lng_max);
         CREATE UNIQUE INDEX sa_id_idx
-        ON spatial_analysis_units (id);
+        ON spatial_analysis_units (polygon_id);
 
         CREATE TABLE identified_dams (
             dam_id INTEGER NOT NULL PRIMARY KEY,
@@ -249,7 +244,8 @@ def initalize_spatial_search_units(database_path, complete_token_path):
     cursor.close()
     connection.commit()
 
-    # define the spatial search units
+    # only search regions that could have dams, i.e. countries and bound by
+    # latitude
     DATABASE_STATUS_STR = "convert borders to prepared geometry"
     LOGGER.debug(DATABASE_STATUS_STR)
 
@@ -264,9 +260,8 @@ def initalize_spatial_search_units(database_path, complete_token_path):
         world_border_polygon_list.append(geom)
 
     str_tree = shapely.strtree.STRtree(world_border_polygon_list)
-
     spatial_analysis_unit_list = []
-    spatial_analysis_id = 0
+    current_polygon_id = 0
     # 66N to 56S lat because 66N is arctic circle and 56S is about how far
     # the land went down
     for lat in range(-56, 66):
@@ -279,15 +274,22 @@ def initalize_spatial_search_units(database_path, complete_token_path):
                     name_list.append(intersect_geom.country_name)
             if name_list:
                 spatial_analysis_unit_list.append(
-                    (spatial_analysis_id, 'unscheduled',
+                    (current_polygon_id, 'unscheduled',
                      ','.join(name_list), lat, lng, lat+1, lng+1))
-                spatial_analysis_id += 1
+                current_polygon_id += 1
 
     connection = sqlite3.connect(database_path)
     cursor = connection.cursor()
+
+    # indicate that the first tick is ALL the polygons being added
+    cursor.execute(
+        'INSERT INTO update_history(update_tick, polygon_id_list) '
+        'VALUES(?, ?)', (0, pickle.dumps(
+            list(range(current_polygon_id)))))
+
     cursor.executemany(
         'INSERT INTO spatial_analysis_units( '
-        'id, state, country_list, lat_min, lng_min, lat_max, lng_max) '
+        'polygon_id, state, country_list, lat_min, lng_min, lat_max, lng_max) '
         'VALUES(?, ?, ?, ?, ?, ?, ?)', spatial_analysis_unit_list)
     cursor.close()
     connection.commit()
@@ -299,7 +301,25 @@ def initalize_spatial_search_units(database_path, complete_token_path):
 
 def schedule_workder():
     """Thread to schedule areas to prioritize."""
-    pass
+    cursor.execute(
+        'SELECT id FROM spatial_analysis_units '
+        'ORDER BY RANDOM() LIMIT 1;')
+    (polygon_id,) = cursor.fetchone()
+    cursor.execute(
+        'UPDATE spatial_analysis_units SET state = ? WHERE id = ?',
+        ('scheduled', polygon_id))
+    cursor.execute(
+        'SELECT id, state, lat_min, lng_min, lat_max, lng_max '
+        'FROM spatial_analysis_units WHERE id=?', (polygon_id,))
+    (polygon_id, state, lat_min, lng_min, lat_max, lng_max) = (
+        cursor.fetchone())
+    polygons_to_update = {
+        polygon_id: {
+            'bounds': [[lat_min, lng_min], [lat_max, lng_max]],
+            'state': state,
+            'color': STATE_TO_COLOR[state]
+        }
+    }
 
 
 def main():
