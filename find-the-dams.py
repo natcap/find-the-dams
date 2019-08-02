@@ -60,36 +60,41 @@ def index():
 @APP.route('/processing_status/', methods=['POST'])
 def processing_status():
     """Return results about polygons that are processing."""
-    LOGGER.debug(DATABASE_STATUS_STR)
-    result = json.dumps({
-        'query_time': 'init',
-        'n_units': 'init',
-    })
-
-    if DATABASE_STATUS_STR is not None:
-        return json.dumps({
-            'query_time': DATABASE_STATUS_STR,
-            'n_units': DATABASE_STATUS_STR,
-        })
     try:
+        polygons_to_update = {}
+        payload = None
+        LOGGER.debug(flask.request.form)
         database_uri = 'file:%s?mode=ro' % DATABASE_PATH
         connection = sqlite3.connect(database_uri, uri=True)
         cursor = connection.cursor()
+        if flask.request.form.get('update_only') == 'false':
+            cursor.execute(
+                "SELECT id, state, lat_min, lng_min, lat_max, lng_max "
+                "from spatial_analysis_units;")
+            polygons_to_update = {
+                polygon_id: {
+                    'bounds': [[lat_min, lng_min], [lat_max, lng_max]],
+                    'state': state
+                } for (
+                    polygon_id, state, lat_min, lng_min, lat_max, lng_max) in
+                cursor.fetchall()
+            }
+        else:
+            pass
+
         cursor.execute("SELECT count(id) from spatial_analysis_units;")
-        (n_units,) = cursor.fetchone()
+        (n_processing_units,) = cursor.fetchone()
+        payload = json.dumps({
+                'query_time': str(datetime.datetime.now()),
+                'n_processing_units': n_processing_units,
+                'polygons_to_update': polygons_to_update
+            })
         cursor.close()
         connection.commit()
-        result = json.dumps({
-            'query_time': str(datetime.datetime.now()),
-            'n_units': n_units,
-            })
-    except Exception as e:
-        result = result = json.dumps({
-            'query_time': str(e),
-            'n_units': str(e),
-            })
+    except Exception:
+        pass
     finally:
-        return result
+        return payload
 
 
 def initalize_spatial_search_units(database_path, complete_token_path):
