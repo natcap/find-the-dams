@@ -106,11 +106,10 @@
             },
             dataType: 'json',
             success: function (data) {
-                last_update_tick = data['last_update_tick']
+                last_update_tick = parseInt(data['last_update_tick']);
                 $('#status').html(
                     '<p>'+data['query_time']+'</p><p>n_units: '+
                     data['n_processing_units']+'</p>');
-                last_update_tick = update_only = true;
                 $.each(
                     data['polygons_to_update'],
                     function(polygon_id, state) {
@@ -134,11 +133,11 @@
             }
         }).fail(function(data) {
             $('#status').html('error: ' + JSON.stringify(data));
+        }).always(function() {
+            setTimeout(update_processing_status, 2500);
         });
     };
-
     update_processing_status();
-    setInterval(update_processing_status, 2500);
 
 </script>
 </html>
