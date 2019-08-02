@@ -28,9 +28,7 @@ logging.getLogger('taskgraph').setLevel(logging.INFO)
 DAM_BOUNDING_BOX_URL = (
     'https://storage.googleapis.com/natcap-natgeo-dam-ecoshards/'
     'dams_database_md5_7acdf64cd03791126a61478e121c4772.db')
-GLOBAL_POLYGON_URL = (
-    'https://storage.googleapis.com/natcap-natgeo-dam-ecoshards/'
-    'global_polygon_valid_md5_d1d71564442d850c8b1884e79e519d8f.gpkg')
+GLOBAL_POLYGON_PATH = 'global_polygon_simplified.gpkg'
 LOGGER = logging.getLogger(__name__)
 
 WORKSPACE_DIR = 'workspace'
@@ -165,10 +163,12 @@ def initalize_spatial_search_units(database_path, complete_token_path):
     if not os.path.exists(dam_bounding_box_bb_path):
         dam_bounding_box_bb_tmp_path = '%s.tmp' % dam_bounding_box_bb_path
         DATABASE_STATUS_STR = "download validated dam bounding box database"
+        LOGGER.debug(DATABASE_STATUS_STR)
         urllib.request.urlretrieve(
             DAM_BOUNDING_BOX_URL, dam_bounding_box_bb_tmp_path)
         os.rename(dam_bounding_box_bb_tmp_path, dam_bounding_box_bb_path)
     DATABASE_STATUS_STR = "parse dam bounding box database for valid dams"
+    LOGGER.debug(DATABASE_STATUS_STR)
     try:
         connection = sqlite3.connect(dam_bounding_box_bb_path)
         cursor = connection.cursor()
@@ -202,11 +202,12 @@ def initalize_spatial_search_units(database_path, complete_token_path):
     except Exception:
         LOGGER.exception("Exception encountered.")
     finally:
-        LOGGER.info("all done, signaling stop")
         cursor.close()
         connection.commit()
 
-    DATABASE_STATUS_STR = "insert valid validated dams into `identified_dams` table"
+    DATABASE_STATUS_STR = (
+        "insert valid validated dams into `identified_dams` table")
+    LOGGER.debug(DATABASE_STATUS_STR)
     connection = sqlite3.connect(database_path)
     cursor = connection.cursor()
     cursor.executemany(
@@ -217,24 +218,18 @@ def initalize_spatial_search_units(database_path, complete_token_path):
     connection.commit()
 
     # define the spatial search units
-    DATABASE_STATUS_STR = "download download global polygon"
-    global_polygon_path = os.path.join(
-        WORKSPACE_DIR, os.path.basename(GLOBAL_POLYGON_URL))
-    if not os.path.exists(global_polygon_path):
-        global_polygon_tmp_path = '%s.tmp' % global_polygon_path
-        urllib.request.urlretrieve(
-            GLOBAL_POLYGON_URL, global_polygon_tmp_path)
-        os.rename(global_polygon_tmp_path, global_polygon_path)
-
     DATABASE_STATUS_STR = "convert global polygon to shapely geometry"
-    global_polygon_vector = gdal.OpenEx(global_polygon_path, gdal.OF_VECTOR)
+    LOGGER.debug(DATABASE_STATUS_STR)
+    global_polygon_vector = gdal.OpenEx(GLOBAL_POLYGON_PATH, gdal.OF_VECTOR)
     global_polygon_layer = global_polygon_vector.GetLayer()
     global_polygon_list = [
         shapely.wkb.loads(feature.GetGeometryRef().ExportToWkb())
         for feature in global_polygon_layer]
-    LOGGER.debug("unary union global polygon geometry")
+    DATABASE_STATUS_STR = "unary union global polygon geometry"
+    LOGGER.debug(DATABASE_STATUS_STR)
     global_polygon = shapely.ops.unary_union(global_polygon_list)
-    LOGGER.debug("build spatial index")
+    DATABASE_STATUS_STR = "build spatial index"
+    LOGGER.debug(DATABASE_STATUS_STR)
     global_polygon_prep = shapely.prepared.prep(global_polygon)
 
     spatial_analysis_unit_list = []
@@ -248,6 +243,7 @@ def initalize_spatial_search_units(database_path, complete_token_path):
                 spatial_analysis_unit_list.append(
                     (spatial_analysis_id, 'unscheduled',
                      lat, lng, lat+1, lng+1))
+                spatial_analysis_id += 1
 
     connection = sqlite3.connect(database_path)
     cursor = connection.cursor()
@@ -271,13 +267,13 @@ def main():
         pass
     initalize_token_path = os.path.join(
         WORKSPACE_DIR, 'initalize_spatial_search_units.COMPLETE')
-    task_graph = taskgraph.TaskGraph(WORKSPACE_DIR, 0, 5.0)
+    task_graph = taskgraph.TaskGraph(WORKSPACE_DIR, -1, 5.0)
     task_graph.add_task(
         func=initalize_spatial_search_units,
         args=(DATABASE_PATH, initalize_token_path),
         target_path_list=[initalize_token_path],
         task_name='initialize database')
-    task_graph.join(0)
+    task_graph.join()
     APP.run(host='0.0.0.0', port=8080)
     task_graph.close()
 
