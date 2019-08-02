@@ -272,6 +272,7 @@ def main():
         func=initalize_spatial_search_units,
         args=(DATABASE_PATH, initalize_token_path),
         target_path_list=[initalize_token_path],
+        ignore_path_list=[DATABASE_PATH],
         task_name='initialize database')
     task_graph.join()
     APP.run(host='0.0.0.0', port=8080)

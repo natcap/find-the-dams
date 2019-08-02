@@ -94,6 +94,8 @@
             },
         }).addTo(map);
 
+    var processing_layer = L.featureGroup().addTo(map);
+
     function update_processing_status() {
         $.post({
             url: '/processing_status',
