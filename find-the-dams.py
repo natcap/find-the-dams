@@ -264,8 +264,9 @@ def initalize_spatial_search_units(database_path, complete_token_path):
 
     spatial_analysis_unit_list = []
     spatial_analysis_id = 0
-    # 84N to 56S lat because that's what I eyed as the continent coverage
-    for lat in range(-56, 85):
+    # 66N to 56S lat because 66N is arctic circle and 56S is about how far
+    # the land went down
+    for lat in range(-56, 66):
         LOGGER.debug('processing lat %d', lat)
         for lng in range(-180, 180):
             grid_geom = shapely.geometry.box(lng, lat, lng+1, lat+1)
