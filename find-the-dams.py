@@ -1,5 +1,6 @@
 # coding=UTF-8
 """Module to process remote dam detection imagery."""
+import itertools
 import pickle
 import datetime
 import json
@@ -74,16 +75,39 @@ def index():
 def processing_status():
     """Return results about polygons that are processing."""
     try:
-        last_update_tick = flask.request.form.get('last_update_tick')
+        last_update_tick = int(flask.request.form.get('last_update_tick'))
+        LOGGER.debug('last update tick %d', last_update_tick)
         payload = None
         polygons_to_update = {}
         LOGGER.debug(flask.request.form)
-        database_uri = 'file:%s?mode=rw' % DATABASE_PATH
+        database_uri = 'file:%s?mode=ro' % DATABASE_PATH
         connection = sqlite3.connect(database_uri, uri=True)
         cursor = connection.cursor()
+
+        # get the history that hasn't been sent since the last query
         cursor.execute(
-            "SELECT id, state, lat_min, lng_min, lat_max, lng_max "
-            "FROM spatial_analysis_units;")
+            'SELECT polygon_id_list '
+            'FROM update_history '
+            'WHERE update_history.update_tick > ?', (last_update_tick,))
+
+        # build a unique set of changed polygons
+        polygon_update_id_tuple = tuple(set(itertools.chain(
+                *[pickle.loads(blob) for (blob,) in cursor.fetchall()])))
+        LOGGER.debug(polygon_update_id_tuple)
+
+        # get the current tick in the database
+        (current_update_tick,) = cursor.execute(
+            'SELECT max(update_tick) FROM update_history;').fetchone()
+
+        # fetch all polygons that have changed
+        cursor.execute(
+            "SELECT polygon_id, state, lat_min, lng_min, lat_max, lng_max "
+            "FROM spatial_analysis_units "
+            "WHERE polygon_id in (" +
+            ','.join([str(x) for x in polygon_update_id_tuple]) + ")")
+
+        # construct a return object that indicated which polygons should be
+        # updated on the client
         polygons_to_update = {
             polygon_id: {
                 'bounds': [[lat_min, lng_min], [lat_max, lng_max]],
@@ -94,20 +118,24 @@ def processing_status():
             cursor.fetchall()
         }
 
-        cursor.execute("SELECT count(id) from spatial_analysis_units;")
+        # count how many polygons just for reference
+        cursor.execute(
+            "SELECT count(polygon_id) from spatial_analysis_units;")
         (n_processing_units,) = cursor.fetchone()
+
+        # construct final payload
         payload = json.dumps({
-            'last_update_tick': last_update_tick,
+            'last_update_tick': int(current_update_tick),
             'query_time': str(datetime.datetime.now()),
             'n_processing_units': n_processing_units,
             'polygons_to_update': polygons_to_update
         })
         cursor.close()
         connection.commit()
-    except Exception:
-        LOGGER.exception('encountered exception')
-    finally:
         return payload
+    except Exception as e:
+        LOGGER.exception('encountered exception')
+        return str(e)
 
 
 def initalize_spatial_search_units(database_path, complete_token_path):
@@ -299,7 +327,7 @@ def initalize_spatial_search_units(database_path, complete_token_path):
     DATABASE_STATUS_STR = None
 
 
-def schedule_workder():
+def schedule_worker():
     """Thread to schedule areas to prioritize."""
     cursor.execute(
         'SELECT id FROM spatial_analysis_units '
