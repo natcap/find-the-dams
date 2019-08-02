@@ -70,13 +70,13 @@ def processing_status():
         polygons_to_update = {}
         payload = None
         LOGGER.debug(flask.request.form)
-        database_uri = 'file:%s?mode=ro' % DATABASE_PATH
+        database_uri = 'file:%s?mode=rw' % DATABASE_PATH
         connection = sqlite3.connect(database_uri, uri=True)
         cursor = connection.cursor()
         if flask.request.form.get('update_only') == 'false':
             cursor.execute(
                 "SELECT id, state, lat_min, lng_min, lat_max, lng_max "
-                "from spatial_analysis_units;")
+                "FROM spatial_analysis_units;")
             polygons_to_update = {
                 polygon_id: {
                     'bounds': [[lat_min, lng_min], [lat_max, lng_max]],
@@ -87,7 +87,25 @@ def processing_status():
                 cursor.fetchall()
             }
         else:
-            pass
+            cursor.execute(
+                'SELECT id FROM spatial_analysis_units '
+                'ORDER BY RANDOM() LIMIT 1;')
+            (polygon_id,) = cursor.fetchone()
+            cursor.execute(
+                'UPDATE spatial_analysis_units SET state = ? WHERE id = ?',
+                ('scheduled', polygon_id))
+            cursor.execute(
+                'SELECT id, state, lat_min, lng_min, lat_max, lng_max '
+                'FROM spatial_analysis_units WHERE id=?', (polygon_id,))
+            (polygon_id, state, lat_min, lng_min, lat_max, lng_max) = (
+                cursor.fetchone())
+            polygons_to_update = {
+                polygon_id: {
+                    'bounds': [[lat_min, lng_min], [lat_max, lng_max]],
+                    'state': state,
+                    'color': STATE_TO_COLOR[state]
+                }
+            }
 
         cursor.execute("SELECT count(id) from spatial_analysis_units;")
         (n_processing_units,) = cursor.fetchone()
@@ -99,7 +117,7 @@ def processing_status():
         cursor.close()
         connection.commit()
     except Exception:
-        pass
+        LOGGER.exception('encountered exception')
     finally:
         return payload
 

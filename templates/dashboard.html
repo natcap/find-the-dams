@@ -114,16 +114,22 @@
                 $.each(
                     data_json['polygons_to_update'],
                     function(polygon_id, state) {
-                        var rect = L.rectangle(
-                            state['bounds'],
-                            {
-                                color: state['color'],
-                                weight: 1,
-                                fill: true,
-                                fillOpacity: 0.6,
-                            }).addTo(
-                                processing_layer);
-                        status_polygons[polygon_id] = rect;
+                        if (!(polygon_id in status_polygons)) {
+                            var rect = L.rectangle(
+                                state['bounds'],
+                                {
+                                    color: state['color'],
+                                    weight: 1,
+                                    fill: true,
+                                    fillOpacity: 0.6,
+                                }).addTo(
+                                    processing_layer);
+                            status_polygons[polygon_id] = rect;
+                        } else {
+                            status_polygons[polygon_id].setStyle({
+                                color: state['color']
+                            });
+                        }
                     });
             }
         }).fail(function(data) {
