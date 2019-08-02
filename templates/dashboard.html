@@ -116,7 +116,12 @@
                     function(polygon_id, state) {
                         var rect = L.rectangle(
                             state['bounds'],
-                            {color: "#ff7800", weight: 1}).addTo(
+                            {
+                                color: state['color'],
+                                weight: 1,
+                                fill: true,
+                                fillOpacity: 0.6,
+                            }).addTo(
                                 processing_layer);
                         status_polygons[polygon_id] = rect;
                     });
