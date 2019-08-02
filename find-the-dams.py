@@ -33,8 +33,14 @@ LOGGER = logging.getLogger(__name__)
 
 WORKSPACE_DIR = 'workspace'
 DATABASE_PATH = os.path.join(WORKSPACE_DIR, 'find-the-dams.db')
-
 DATABASE_STATUS_STR = None
+STATE_TO_COLOR = {
+    'unscheduled': '#666666',
+    'scheduled': '#FF9900',
+    'fetching data': '#3300FF',
+    'analyzing': '#3333FF',
+    'complete': '#33CC00',
+}
 
 APP = Flask(__name__, static_url_path='', static_folder='')
 APP.config['SECRET_KEY'] = b'\xe2\xa9\xd2\x82\xd5r\xef\xdb\xffK\x97\xcfM\xa2WH'
@@ -74,7 +80,8 @@ def processing_status():
             polygons_to_update = {
                 polygon_id: {
                     'bounds': [[lat_min, lng_min], [lat_max, lng_max]],
-                    'state': state
+                    'state': state,
+                    'color': STATE_TO_COLOR[state]
                 } for (
                     polygon_id, state, lat_min, lng_min, lat_max, lng_max) in
                 cursor.fetchall()
