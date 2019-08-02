@@ -14,6 +14,7 @@ from osgeo import gdal
 import shapely.prepared
 import shapely.ops
 import shapely.wkb
+import shapely.strtree
 from flask import Flask
 import flask
 
@@ -28,7 +29,7 @@ logging.getLogger('taskgraph').setLevel(logging.INFO)
 DAM_BOUNDING_BOX_URL = (
     'https://storage.googleapis.com/natcap-natgeo-dam-ecoshards/'
     'dams_database_md5_7acdf64cd03791126a61478e121c4772.db')
-GLOBAL_POLYGON_PATH = 'global_polygon_simplified.gpkg'
+WORLD_BORDERS_VECTOR_PATH = 'world_borders.gpkg'
 LOGGER = logging.getLogger(__name__)
 
 WORKSPACE_DIR = 'workspace'
@@ -141,6 +142,7 @@ def initalize_spatial_search_units(database_path, complete_token_path):
         CREATE TABLE spatial_analysis_units (
             id INTEGER NOT NULL PRIMARY KEY,
             state TEXT NOT NULL,
+            country_list TEXT NOT NULL,
             lat_min REAL NOT NULL,
             lng_min REAL NOT NULL,
             lat_max REAL NOT NULL,
@@ -248,19 +250,20 @@ def initalize_spatial_search_units(database_path, complete_token_path):
     connection.commit()
 
     # define the spatial search units
-    DATABASE_STATUS_STR = "convert global polygon to shapely geometry"
+    DATABASE_STATUS_STR = "convert borders to prepared geometry"
     LOGGER.debug(DATABASE_STATUS_STR)
-    global_polygon_vector = gdal.OpenEx(GLOBAL_POLYGON_PATH, gdal.OF_VECTOR)
-    global_polygon_layer = global_polygon_vector.GetLayer()
-    global_polygon_list = [
-        shapely.wkb.loads(feature.GetGeometryRef().ExportToWkb())
-        for feature in global_polygon_layer]
-    DATABASE_STATUS_STR = "unary union global polygon geometry"
-    LOGGER.debug(DATABASE_STATUS_STR)
-    global_polygon = shapely.ops.unary_union(global_polygon_list)
-    DATABASE_STATUS_STR = "build spatial index"
-    LOGGER.debug(DATABASE_STATUS_STR)
-    global_polygon_prep = shapely.prepared.prep(global_polygon)
+
+    world_borders_vector = gdal.OpenEx(
+        WORLD_BORDERS_VECTOR_PATH, gdal.OF_VECTOR)
+    world_borders_layer = world_borders_vector.GetLayer()
+    world_border_polygon_list = []
+    for feature in world_borders_layer:
+        geom = shapely.wkb.loads(
+            feature.GetGeometryRef().ExportToWkb())
+        geom.country_name = feature.GetField('NAME')
+        world_border_polygon_list.append(geom)
+
+    str_tree = shapely.strtree.STRtree(world_border_polygon_list)
 
     spatial_analysis_unit_list = []
     spatial_analysis_id = 0
@@ -270,24 +273,33 @@ def initalize_spatial_search_units(database_path, complete_token_path):
         LOGGER.debug('processing lat %d', lat)
         for lng in range(-180, 180):
             grid_geom = shapely.geometry.box(lng, lat, lng+1, lat+1)
-            if global_polygon_prep.intersects(grid_geom):
+            name_list = []
+            for intersect_geom in str_tree.query(grid_geom):
+                if intersect_geom.intersects(grid_geom):
+                    name_list.append(intersect_geom.country_name)
+            if name_list:
                 spatial_analysis_unit_list.append(
                     (spatial_analysis_id, 'unscheduled',
-                     lat, lng, lat+1, lng+1))
+                     ','.join(name_list), lat, lng, lat+1, lng+1))
                 spatial_analysis_id += 1
 
     connection = sqlite3.connect(database_path)
     cursor = connection.cursor()
     cursor.executemany(
         'INSERT INTO spatial_analysis_units( '
-        'id, state, lat_min, lng_min, lat_max, lng_max) '
-        'VALUES(?, ?, ?, ?, ?, ?)', spatial_analysis_unit_list)
+        'id, state, country_list, lat_min, lng_min, lat_max, lng_max) '
+        'VALUES(?, ?, ?, ?, ?, ?, ?)', spatial_analysis_unit_list)
     cursor.close()
     connection.commit()
 
     with open(complete_token_path, 'w') as token_file:
         token_file.write(str(datetime.datetime.now()))
     DATABASE_STATUS_STR = None
+
+
+def schedule_workder():
+    """Thread to schedule areas to prioritize."""
+    pass
 
 
 def main():
