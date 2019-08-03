@@ -1,5 +1,7 @@
 # coding=UTF-8
 """Module to process remote dam detection imagery."""
+import threading
+import time
 import itertools
 import pickle
 import datetime
@@ -11,6 +13,7 @@ import os
 import sys
 import logging
 
+import retrying
 import taskgraph
 from osgeo import gdal
 import shapely.prepared
@@ -72,6 +75,9 @@ def index():
 
 
 @APP.route('/processing_status/', methods=['POST'])
+@retrying.retry(
+    wait_exponential_multiplier=1000, wait_exponential_max=10000,
+    stop_max_attempt_number=5)
 def processing_status():
     """Return results about polygons that are processing."""
     try:
@@ -327,27 +333,38 @@ def initalize_spatial_search_units(database_path, complete_token_path):
     DATABASE_STATUS_STR = None
 
 
-def schedule_worker():
+@retrying.retry(
+    wait_exponential_multiplier=1000, wait_exponential_max=10000,
+    stop_max_attempt_number=5)
+def schedule_worker(database_path):
     """Thread to schedule areas to prioritize."""
-    cursor.execute(
-        'SELECT id FROM spatial_analysis_units '
-        'ORDER BY RANDOM() LIMIT 1;')
-    (polygon_id,) = cursor.fetchone()
-    cursor.execute(
-        'UPDATE spatial_analysis_units SET state = ? WHERE id = ?',
-        ('scheduled', polygon_id))
-    cursor.execute(
-        'SELECT id, state, lat_min, lng_min, lat_max, lng_max '
-        'FROM spatial_analysis_units WHERE id=?', (polygon_id,))
-    (polygon_id, state, lat_min, lng_min, lat_max, lng_max) = (
-        cursor.fetchone())
-    polygons_to_update = {
-        polygon_id: {
-            'bounds': [[lat_min, lng_min], [lat_max, lng_max]],
-            'state': state,
-            'color': STATE_TO_COLOR[state]
-        }
-    }
+    try:
+        LOGGER.debug('starting schedule worker')
+        while True:
+            connection = sqlite3.connect(database_path)
+            cursor = connection.cursor()
+            cursor.execute(
+                'SELECT polygon_id FROM spatial_analysis_units '
+                'WHERE country_list like "%South Africa%" '
+                'AND state="unscheduled" '
+                'ORDER BY RANDOM() LIMIT 1;')
+            (polygon_id,) = cursor.fetchone()
+            LOGGER.debug('scheduling polygon %s', polygon_id)
+            cursor.execute(
+                'UPDATE spatial_analysis_units SET state=? '
+                'WHERE polygon_id=?',
+                ('fetching data', polygon_id))
+            (current_update_tick,) = cursor.execute(
+                'SELECT max(update_tick) FROM update_history;').fetchone()
+            cursor.execute(
+                'INSERT INTO update_history(update_tick, polygon_id_list) '
+                'VALUES(?,?)', (
+                    current_update_tick+1, pickle.dumps([polygon_id])))
+            cursor.close()
+            connection.commit()
+            time.sleep(1)
+    except Exception:
+        LOGGER.exception('exception in schedule worker')
 
 
 def main():
@@ -366,8 +383,13 @@ def main():
         ignore_path_list=[DATABASE_PATH],
         task_name='initialize database')
     task_graph.join()
+    schedule_worker_thread = threading.Thread(
+        target=schedule_worker,
+        args=(DATABASE_PATH,))
+    schedule_worker_thread.start()
     APP.run(host='0.0.0.0', port=8080)
     task_graph.close()
+    schedule_worker_thread.join()
 
 
 if __name__ == '__main__':
