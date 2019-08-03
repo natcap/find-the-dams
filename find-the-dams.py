@@ -129,17 +129,24 @@ def processing_status():
         cursor.execute(
             "SELECT count(polygon_id) from spatial_analysis_units;")
         (n_processing_units,) = cursor.fetchone()
-
         # construct final payload
-        payload = json.dumps({
+        payload = {
             'last_update_tick': int(current_update_tick),
             'query_time': str(datetime.datetime.now()),
             'n_processing_units': n_processing_units,
             'polygons_to_update': polygons_to_update
-        })
+        }
+
+        # add all the sptal analysis status
+        for state in STATE_TO_COLOR:
+            cursor.execute(
+                "SELECT count(polygon_id) from spatial_analysis_units "
+                "WHERE state=?", (state,))
+            payload[state] = cursor.fetchone()[0]
+
         cursor.close()
         connection.commit()
-        return payload
+        return json.dumps(payload)
     except Exception as e:
         LOGGER.exception('encountered exception')
         return str(e)
