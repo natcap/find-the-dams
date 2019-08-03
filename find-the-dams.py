@@ -401,7 +401,8 @@ def schedule_worker(fetch_work_queue, database_path):
     wait_exponential_multiplier=1000, wait_exponential_max=10000,
     stop_max_attempt_number=5)
 def fetch_worker(
-        fetch_queue, database_uri, planet_api_key, mosaic_quad_list_url):
+        fetch_queue, download_queue, database_uri, planet_api_key,
+        mosaic_quad_list_url):
     """Thread to schedule areas to prioritize."""
     global PLANET_QUADS_DIR
     try:
@@ -429,10 +430,15 @@ def fetch_worker(
             LOGGER.debug(mosaic_quad_response_dict)
             for mosaic_item in mosaic_quad_response_dict['items']:
                 download_url = (mosaic_item['_links']['download'])
+                suffix_subdir = os.path.join(
+                    *reversed(mosaic_item["id"][-4::]))
                 download_raster_path = os.path.join(
-                    PLANET_QUADS_DIR, f'{mosaic_item["id"]}.tif')
+                    PLANET_QUADS_DIR, suffix_subdir,
+                    f'{mosaic_item["id"]}.tif')
                 LOGGER.debug(
                     'download %s to %s', download_url, download_raster_path)
+                download_queue.put(
+                    (download_url, download_raster_path))
             # download all the tiles that match
             # pass each tile to an inference queue
             LOGGER.debug(
@@ -463,6 +469,7 @@ def main():
         task_name='initialize database')
     task_graph.join()
     fetch_work_queue = queue.Queue(2)
+    download_queue = queue.Queue(2)
     schedule_worker_thread = threading.Thread(
         target=schedule_worker,
         args=(fetch_work_queue, DATABASE_PATH,))
@@ -512,7 +519,7 @@ def main():
     fetch_worker_thread = threading.Thread(
         target=fetch_worker,
         args=(
-            fetch_work_queue, ro_database_uri, planet_api_key,
+            fetch_work_queue, download_queue, ro_database_uri, planet_api_key,
             mosaic_quad_list_url))
     fetch_worker_thread.start()
 
