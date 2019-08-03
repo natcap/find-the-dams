@@ -108,8 +108,14 @@
             success: function (data) {
                 last_update_tick = parseInt(data['last_update_tick']);
                 $('#status').html(
-                    '<p>'+data['query_time']+'</p><p>n_units: '+
-                    data['n_processing_units']+'</p>');
+                    '<p>'+data['query_time']+'</p>'+
+                    '<table><tr><th>status</th><th>count</th></tr>'+
+                    '<tr><td>unscheduled</td><td>'+data['unscheduled']+'</td></tr>' +
+                    '<tr><td>fetching data</td><td>'+data['fetching data']+'</td></tr>' +
+                    '<tr><td>analyzing</td><td>'+data['analyzing']+'</td></tr>' +
+                    '<tr><td>complete</td><td>'+data['complete']+'</td></tr>' +
+                    '<tr><th>TOTAL</th><td>'+data['n_processing_units']+'</td></tr>' +
+                    '</table>');
                 $.each(
                     data['polygons_to_update'],
                     function(polygon_id, state) {
