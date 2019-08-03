@@ -1,5 +1,6 @@
 # coding=UTF-8
 """Module to process remote dam detection imagery."""
+import queue
 import threading
 import time
 import itertools
@@ -336,7 +337,7 @@ def initalize_spatial_search_units(database_path, complete_token_path):
 @retrying.retry(
     wait_exponential_multiplier=1000, wait_exponential_max=10000,
     stop_max_attempt_number=5)
-def schedule_worker(database_path):
+def schedule_worker(fetch_work_queue, database_path):
     """Thread to schedule areas to prioritize."""
     try:
         LOGGER.debug('starting schedule worker')
@@ -345,8 +346,9 @@ def schedule_worker(database_path):
             cursor = connection.cursor()
             cursor.execute(
                 'SELECT polygon_id FROM spatial_analysis_units '
-                'WHERE country_list like "%South Africa%" '
-                'AND state="unscheduled" '
+                'WHERE (country_list like "%South Africa%" '
+                'AND state="unscheduled") '
+                'OR state="unscheduled" '
                 'ORDER BY RANDOM() LIMIT 1;')
             (polygon_id,) = cursor.fetchone()
             LOGGER.debug('scheduling polygon %s', polygon_id)
@@ -362,6 +364,35 @@ def schedule_worker(database_path):
                     current_update_tick+1, pickle.dumps([polygon_id])))
             cursor.close()
             connection.commit()
+            fetch_work_queue.put(polygon_id)
+            time.sleep(1)
+    except Exception:
+        LOGGER.exception('exception in schedule worker')
+
+
+@retrying.retry(
+    wait_exponential_multiplier=1000, wait_exponential_max=10000,
+    stop_max_attempt_number=5)
+def fetch_worker(fetch_queue, database_uri):
+    """Thread to schedule areas to prioritize."""
+    try:
+        LOGGER.debug('starting fetch queue worker')
+        while True:
+            dam_id = fetch_queue.get()
+            LOGGER.debug('about to fetch dam_id %s', dam_id)
+            connection = sqlite3.connect(database_uri, uri=True)
+            cursor = connection.cursor()
+            cursor.execute(
+                'SELECT state, lat_min, lng_min, lat_max, lng_max '
+                'FROM spatial_analysis_units '
+                'WHERE polygon_id=?', (dam_id,))
+            (state, lat_min, lng_min, lat_max, lng_max) = cursor.fetchone()
+            LOGGER.debug(
+                'ready to fetch %s', (
+                    dam_id, state, lat_min, lng_min, lat_max, lng_max))
+            cursor.close()
+            connection.commit()
+
             time.sleep(1)
     except Exception:
         LOGGER.exception('exception in schedule worker')
@@ -383,10 +414,17 @@ def main():
         ignore_path_list=[DATABASE_PATH],
         task_name='initialize database')
     task_graph.join()
+    fetch_work_queue = queue.Queue(2)
     schedule_worker_thread = threading.Thread(
         target=schedule_worker,
-        args=(DATABASE_PATH,))
+        args=(fetch_work_queue, DATABASE_PATH,))
     schedule_worker_thread.start()
+    ro_database_uri = 'file:%s?mode=ro' % DATABASE_PATH
+    fetch_worker_thread = threading.Thread(
+        target=fetch_worker,
+        args=(fetch_work_queue, ro_database_uri))
+    fetch_worker_thread.start()
+
     APP.run(host='0.0.0.0', port=8080)
     task_graph.close()
     schedule_worker_thread.join()
