@@ -14,6 +14,7 @@ import os
 import sys
 import logging
 
+import requests
 import retrying
 import taskgraph
 from osgeo import gdal
@@ -40,6 +41,10 @@ LOGGER = logging.getLogger(__name__)
 
 WORKSPACE_DIR = 'workspace'
 DATABASE_PATH = os.path.join(WORKSPACE_DIR, 'find-the-dams.db')
+PLANET_API_KEY_FILE = 'planet_api_key.txt'
+ACTIVE_MOSAIC_JSON_PATH = os.path.join(WORKSPACE_DIR, 'active_mosaic.json')
+PLANET_QUADS_DIR = None
+REQUEST_TIMEOUT = 5
 DATABASE_STATUS_STR = None
 STATE_TO_COLOR = {
     'unscheduled': '#666666',
@@ -137,7 +142,7 @@ def processing_status():
             'polygons_to_update': polygons_to_update
         }
 
-        # add all the sptal analysis status
+        # add all the saptal analysis status
         for state in STATE_TO_COLOR:
             cursor.execute(
                 "SELECT count(polygon_id) from spatial_analysis_units "
@@ -150,6 +155,21 @@ def processing_status():
     except Exception as e:
         LOGGER.exception('encountered exception')
         return str(e)
+
+
+@retrying.retry(wait_exponential_multiplier=1000, wait_exponential_max=10000)
+def get_bounding_box_quads(
+        session, mosaic_quad_list_url, min_x, min_y, max_x, max_y):
+    """Query for mosaic via bounding box and retry if necessary."""
+    try:
+        mosaic_quad_response = session.get(
+            f'{mosaic_quad_list_url}?bbox={min_x},{min_y},{max_x},{max_y}',
+            timeout=REQUEST_TIMEOUT)
+        return mosaic_quad_response
+    except Exception:
+        LOGGER.exception(
+            f"get_bounding_box_quads {min_x},{min_y},{max_x},{max_y} failed")
+        raise
 
 
 def initalize_spatial_search_units(database_path, complete_token_path):
@@ -380,10 +400,15 @@ def schedule_worker(fetch_work_queue, database_path):
 @retrying.retry(
     wait_exponential_multiplier=1000, wait_exponential_max=10000,
     stop_max_attempt_number=5)
-def fetch_worker(fetch_queue, database_uri):
+def fetch_worker(
+        fetch_queue, database_uri, planet_api_key, mosaic_quad_list_url):
     """Thread to schedule areas to prioritize."""
+    global PLANET_QUADS_DIR
     try:
         LOGGER.debug('starting fetch queue worker')
+        session = requests.Session()
+        session.auth = (planet_api_key, '')
+
         while True:
             dam_id = fetch_queue.get()
             LOGGER.debug('about to fetch dam_id %s', dam_id)
@@ -394,6 +419,22 @@ def fetch_worker(fetch_queue, database_uri):
                 'FROM spatial_analysis_units '
                 'WHERE polygon_id=?', (dam_id,))
             (state, lat_min, lng_min, lat_max, lng_max) = cursor.fetchone()
+            # find planet bounding boxes
+            LOGGER.debug('fetching %s', (lat_min, lng_min, lat_max, lng_max))
+            mosaic_quad_response = get_bounding_box_quads(
+                session, mosaic_quad_list_url,
+                lng_min, lat_min, lng_max, lat_max)
+            LOGGER.debug(mosaic_quad_response)
+            mosaic_quad_response_dict = mosaic_quad_response.json()
+            LOGGER.debug(mosaic_quad_response_dict)
+            for mosaic_item in mosaic_quad_response_dict['items']:
+                download_url = (mosaic_item['_links']['download'])
+                download_raster_path = os.path.join(
+                    PLANET_QUADS_DIR, f'{mosaic_item["id"]}.tif')
+                LOGGER.debug(
+                    'download %s to %s', download_url, download_raster_path)
+            # download all the tiles that match
+            # pass each tile to an inference queue
             LOGGER.debug(
                 'ready to fetch %s', (
                     dam_id, state, lat_min, lng_min, lat_max, lng_max))
@@ -402,7 +443,7 @@ def fetch_worker(fetch_queue, database_uri):
 
             time.sleep(1)
     except Exception:
-        LOGGER.exception('exception in schedule worker')
+        LOGGER.exception('exception in fetch worker')
 
 
 def main():
@@ -427,9 +468,52 @@ def main():
         args=(fetch_work_queue, DATABASE_PATH,))
     schedule_worker_thread.start()
     ro_database_uri = 'file:%s?mode=ro' % DATABASE_PATH
+
+    # find the most recent mosaic we can use
+    with open(PLANET_API_KEY_FILE, 'r') as planet_api_key_file:
+        planet_api_key = planet_api_key_file.read().rstrip()
+
+    session = requests.Session()
+    session.auth = (planet_api_key, '')
+
+    if not os.path.exists(ACTIVE_MOSAIC_JSON_PATH):
+        mosaics_json = session.get(
+            'https://api.planet.com/basemaps/v1/mosaics',
+            timeout=REQUEST_TIMEOUT)
+        most_recent_date = ''
+        active_mosaic = None
+        for mosaic_data in mosaics_json.json()['mosaics']:
+            if mosaic_data['interval'] != '3 mons':
+                continue
+            last_acquired_date = mosaic_data['last_acquired']
+            LOGGER.debug(last_acquired_date)
+            if last_acquired_date > most_recent_date:
+                most_recent_date = last_acquired_date
+                active_mosaic = mosaic_data
+        with open(ACTIVE_MOSAIC_JSON_PATH, 'w') as active_mosaic_file:
+            active_mosaic_file.write(json.dumps(active_mosaic))
+    else:
+        with open(ACTIVE_MOSAIC_JSON_PATH, 'r') as active_mosaic_file:
+            active_mosaic = json.load(active_mosaic_file)
+
+    global PLANET_QUADS_DIR
+    PLANET_QUADS_DIR = os.path.join(
+        WORKSPACE_DIR, 'planet_quads_dir', active_mosaic['id'])
+
+    LOGGER.debug(
+        'using this mosaic: '
+        f"""{active_mosaic['last_acquired']} {active_mosaic['interval']} {
+            active_mosaic['grid']['resolution']}""")
+
+    mosaic_quad_list_url = (
+        f"""https://api.planet.com/basemaps/v1/mosaics/"""
+        f"""{active_mosaic['id']}/quads""")
+
     fetch_worker_thread = threading.Thread(
         target=fetch_worker,
-        args=(fetch_work_queue, ro_database_uri))
+        args=(
+            fetch_work_queue, ro_database_uri, planet_api_key,
+            mosaic_quad_list_url))
     fetch_worker_thread.start()
 
     APP.run(host='0.0.0.0', port=8080)
