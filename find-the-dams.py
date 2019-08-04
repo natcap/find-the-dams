@@ -1,5 +1,6 @@
 # coding=UTF-8
 """Module to process remote dam detection imagery."""
+import shutil
 import queue
 import threading
 import time
@@ -401,7 +402,7 @@ def schedule_worker(fetch_work_queue, database_path):
     wait_exponential_multiplier=1000, wait_exponential_max=10000,
     stop_max_attempt_number=5)
 def fetch_worker(
-        fetch_queue, download_queue, database_uri, planet_api_key,
+        fetch_queue, inference_queue, database_uri, planet_api_key,
         mosaic_quad_list_url):
     """Thread to schedule areas to prioritize."""
     global PLANET_QUADS_DIR
@@ -428,6 +429,7 @@ def fetch_worker(
             LOGGER.debug(mosaic_quad_response)
             mosaic_quad_response_dict = mosaic_quad_response.json()
             LOGGER.debug(mosaic_quad_response_dict)
+            # download all the tiles that match
             for mosaic_item in mosaic_quad_response_dict['items']:
                 download_url = (mosaic_item['_links']['download'])
                 suffix_subdir = os.path.join(
@@ -435,21 +437,52 @@ def fetch_worker(
                 download_raster_path = os.path.join(
                     PLANET_QUADS_DIR, suffix_subdir,
                     f'{mosaic_item["id"]}.tif')
-                LOGGER.debug(
-                    'download %s to %s', download_url, download_raster_path)
-                download_queue.put(
-                    (download_url, download_raster_path))
-            # download all the tiles that match
-            # pass each tile to an inference queue
-            LOGGER.debug(
-                'ready to fetch %s', (
-                    dam_id, state, lat_min, lng_min, lat_max, lng_max))
+                download_url_to_file(download_url, download_raster_path)
+                LOGGER.debug('downloaded %s', download_url)
+                inference_queue.put(download_raster_path)
             cursor.close()
             connection.commit()
 
             time.sleep(1)
     except Exception:
         LOGGER.exception('exception in fetch worker')
+
+
+@retrying.retry(wait_exponential_multiplier=1000, wait_exponential_max=10000)
+def download_url_to_file(url, target_file_path):
+    """Use requests to download a file.
+
+    Parameters:
+        url (string): url to file.
+        target_file_path (string): local path to download the file.
+
+    Returns:
+        None.
+
+    """
+    try:
+        response = requests.get(url, stream=True, timeout=REQUEST_TIMEOUT)
+        try:
+            os.makedirs(os.path.dirname(target_file_path))
+        except OSError:
+            pass
+        with open(target_file_path, 'wb') as target_file:
+            shutil.copyfileobj(response.raw, target_file)
+        del response
+    except Exception:
+        LOGGER.exception(f"download of {url} to {target_file_path} failed")
+        raise
+
+
+def inference_worker(inference_queue, bounding_box_queue):
+    """Take large tiles and search for dams."""
+    try:
+        while True:
+            tile_path = inference_queue.get()
+            LOGGER.debug('doing inference on %s', tile_path)
+            bounding_box_queue.put(None)
+    except Exception:
+        LOGGER.exception("Exception in inference_worker")
 
 
 def main():
@@ -469,7 +502,7 @@ def main():
         task_name='initialize database')
     task_graph.join()
     fetch_work_queue = queue.Queue(2)
-    download_queue = queue.Queue(2)
+    inference_queue = queue.Queue()
     schedule_worker_thread = threading.Thread(
         target=schedule_worker,
         args=(fetch_work_queue, DATABASE_PATH,))
@@ -519,9 +552,15 @@ def main():
     fetch_worker_thread = threading.Thread(
         target=fetch_worker,
         args=(
-            fetch_work_queue, download_queue, ro_database_uri, planet_api_key,
-            mosaic_quad_list_url))
+            fetch_work_queue, inference_queue, ro_database_uri,
+            planet_api_key, mosaic_quad_list_url))
     fetch_worker_thread.start()
+
+    bounding_box_queue = queue.Queue()
+    inference_worker_thread = threading.Thread(
+        target=inference_worker,
+        args=(inference_queue, bounding_box_queue))
+    inference_worker_thread.start()
 
     APP.run(host='0.0.0.0', port=8080)
     task_graph.close()
