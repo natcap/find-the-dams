@@ -1,5 +1,43 @@
 # coding=UTF-8
-"""Module to process remote dam detection imagery."""
+"""Processing Pipeline and Dashboard to Search for dams on global imagery.
+
+There are x steps:
+0) check to see if anything was interrupted on the last run
+    * fill this in.
+1) grid the planet into chucks that can be processed in parallel
+    * commit to database so we don't do it twice
+2) schedule fetch of Planet imagery for a grid
+    * keep in memory in case there's a fault we can try again
+    * schedule may be prioritized by regions, Lisa wants me to do ZA first
+3) download imagery
+    * commit to database that imagery is downloaded so future scheduling can
+      note this
+4) fragment imagery into chunks that can be processed by the data inference
+   pipeline
+    * keep in memory in case there's fault and we can try again, we'll know
+      approximately the % of processing for a grid to be done for reporting
+    * when a chunk is complete, record:
+        * the discovered bounding box and % of confidence for each bb
+
+5) search imagery for dams w/ NN inference pipeline or Azure ML service
+   pipeline?
+    * this will involve breaking larger tiles into fragments to analyze
+    * these fragments will also be searched for *known* dams
+
+These are the states:
+    * unscheduled (static state)
+    * scheduled (volatile state)
+    * downloaded (static state)
+    * inference data on tile (volatile state)
+    * complete on tile (static state)
+
+These are the questions we can answer during processing:
+    * what is being done right now?
+    * how many dams have been discovered?
+    * what does a particular dam look like?
+    * what dams weren't detected? (i.e. a tile was processed with a dam in it
+      that wasn't found)
+"""
 import shutil
 import queue
 import threading
