@@ -86,21 +86,21 @@ PLANET_QUADS_DIR = None
 REQUEST_TIMEOUT = 5
 DATABASE_STATUS_STR = None
 STATE_TO_COLOR = {
-    'unscheduled': '#666666',
-    'fetching data': '#3300FF',
-    'analyzing': '#3333FF',
-    'complete': '#33CC00',
+    'unscheduled': '#333333',
+    'scheduled': '#FF3333',
+    'downloaded': '#FF6600',
+    'analyzing': '#6666FF',
+    'complete': '#00FF33',
 }
 
 NEXT_STATE = {
-    'unscheduled': 'fetching data',
-    'fetching data': 'analyzing',
+    'unscheduled': 'scheduled',
+    'scheduled': 'downloaded',
+    'downloaded': 'analyzing',
     'analyzing': 'complete',
 }
 
 APP = Flask(__name__, static_url_path='', static_folder='')
-APP.config['SECRET_KEY'] = b'\xe2\xa9\xd2\x82\xd5r\xef\xdb\xffK\x97\xcfM\xa2WH'
-
 
 @APP.route('/favicon.ico')
 def favicon():
@@ -235,9 +235,9 @@ def initalize_spatial_search_units(database_path, complete_token_path):
         CREATE INDEX update_tick_idx
         ON update_history (update_tick);
 
-        CREATE TABLE spatial_analysis_units (
-            polygon_id INTEGER NOT NULL PRIMARY KEY,
-            state TEXT NOT NULL,
+        CREATE TABLE grid_status (
+            grid_id INTEGER NOT NULL PRIMARY KEY,
+            processing_state TEXT NOT NULL,
             country_list TEXT NOT NULL,
             lat_min REAL NOT NULL,
             lng_min REAL NOT NULL,
@@ -253,7 +253,7 @@ def initalize_spatial_search_units(database_path, complete_token_path):
         CREATE INDEX sa_lng_max_idx
         ON spatial_analysis_units (lng_max);
         CREATE UNIQUE INDEX sa_id_idx
-        ON spatial_analysis_units (polygon_id);
+        ON spatial_analysis_units (grid_id);
 
         CREATE TABLE identified_dams (
             dam_id INTEGER NOT NULL PRIMARY KEY,
@@ -389,8 +389,9 @@ def initalize_spatial_search_units(database_path, complete_token_path):
             list(range(current_polygon_id)))))
 
     cursor.executemany(
-        'INSERT INTO spatial_analysis_units( '
-        'polygon_id, state, country_list, lat_min, lng_min, lat_max, lng_max) '
+        'INSERT INTO grid_status( '
+        'polygon_id, processing_state, country_list, '
+        'lat_min, lng_min, lat_max, lng_max) '
         'VALUES(?, ?, ?, ?, ?, ?, ?)', spatial_analysis_unit_list)
     cursor.close()
     connection.commit()
@@ -400,38 +401,27 @@ def initalize_spatial_search_units(database_path, complete_token_path):
     DATABASE_STATUS_STR = None
 
 
-@retrying.retry(
-    wait_exponential_multiplier=1000, wait_exponential_max=10000,
-    stop_max_attempt_number=5)
-def schedule_worker(fetch_work_queue, database_path):
+def schedule_worker(download_work_queue, database_path):
     """Thread to schedule areas to prioritize."""
     try:
+        scheduled_grid_ids = set()
         LOGGER.debug('starting schedule worker')
         while True:
             connection = sqlite3.connect(database_path)
             cursor = connection.cursor()
+            # get a random grid but try South Africa first
             cursor.execute(
-                'SELECT polygon_id FROM spatial_analysis_units '
+                'SELECT grid_id FROM spatial_analysis_units '
                 'WHERE (country_list like "%South Africa%" '
                 'AND state="unscheduled") '
                 'OR state="unscheduled" '
                 'ORDER BY RANDOM() LIMIT 1;')
-            (polygon_id,) = cursor.fetchone()
-            LOGGER.debug('scheduling polygon %s', polygon_id)
-            cursor.execute(
-                'UPDATE spatial_analysis_units SET state=? '
-                'WHERE polygon_id=?',
-                ('fetching data', polygon_id))
-            (current_update_tick,) = cursor.execute(
-                'SELECT max(update_tick) FROM update_history;').fetchone()
-            cursor.execute(
-                'INSERT INTO update_history(update_tick, polygon_id_list) '
-                'VALUES(?,?)', (
-                    current_update_tick+1, pickle.dumps([polygon_id])))
+            (grid_id,) = cursor.fetchone()
+            LOGGER.debug('scheduling grid %s', grid_id)
+            download_work_queue.put(grid_id)
+            scheduled_grid_ids.add(scheduled_grid_ids)
             cursor.close()
             connection.commit()
-            fetch_work_queue.put(polygon_id)
-            time.sleep(1)
     except Exception:
         LOGGER.exception('exception in schedule worker')
 
@@ -539,11 +529,11 @@ def main():
         ignore_path_list=[DATABASE_PATH],
         task_name='initialize database')
     task_graph.join()
-    fetch_work_queue = queue.Queue(2)
+    download_work_queue = queue.Queue(2)
     inference_queue = queue.Queue()
     schedule_worker_thread = threading.Thread(
         target=schedule_worker,
-        args=(fetch_work_queue, DATABASE_PATH,))
+        args=(download_work_queue, DATABASE_PATH,))
     schedule_worker_thread.start()
     ro_database_uri = 'file:%s?mode=ro' % DATABASE_PATH
 
@@ -590,7 +580,7 @@ def main():
     fetch_worker_thread = threading.Thread(
         target=fetch_worker,
         args=(
-            fetch_work_queue, inference_queue, ro_database_uri,
+            download_work_queue, inference_queue, ro_database_uri,
             planet_api_key, mosaic_quad_list_url))
     fetch_worker_thread.start()
 
