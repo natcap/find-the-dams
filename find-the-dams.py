@@ -401,13 +401,13 @@ def initalize_spatial_search_units(database_path, complete_token_path):
     DATABASE_STATUS_STR = None
 
 
-def schedule_worker(download_work_queue, database_path):
+def schedule_worker(download_work_queue, readonly_database_uri):
     """Thread to schedule areas to prioritize."""
     try:
         scheduled_grid_ids = set()
         LOGGER.debug('starting schedule worker')
         while True:
-            connection = sqlite3.connect(database_path)
+            connection = sqlite3.connect(readonly_database_uri, uri=True)
             cursor = connection.cursor()
             # get a random grid but try South Africa first
             cursor.execute(
@@ -426,21 +426,36 @@ def schedule_worker(download_work_queue, database_path):
         LOGGER.exception('exception in schedule worker')
 
 
-@retrying.retry(
-    wait_exponential_multiplier=1000, wait_exponential_max=10000,
-    stop_max_attempt_number=5)
-def fetch_worker(
-        fetch_queue, inference_queue, database_uri, planet_api_key,
-        mosaic_quad_list_url):
-    """Thread to schedule areas to prioritize."""
-    global PLANET_QUADS_DIR
+def download_worker(
+        download_queue, inference_queue, database_uri, planet_api_key,
+        mosaic_quad_list_url, planet_quads_dir):
+    """Fetch Planet tiles as requested.
+
+    Parameters:
+        download_queue (queue): this function will pull from this queue and
+            expect grid ids whose location can be found in the database at
+            `database_uri`.
+        inference_queue (queue): Planet tiles that need the data inference
+            pipeline scheduled will be pushed down this queue.
+        database_uri (str): URI to sqlite database.
+        planet_api_key (str): key to access Planet's RESTful API.
+        mosaic_quad_list_url (str): url that has the Planet global mosaic to
+            query for individual tiles.
+        planet_quads_dir (str): directory to save downloaded planet tiles in.
+            This function will make tree-like subdirectories under the main
+            directory based off the last 3 characters of the tile filename.
+
+    Returns:
+        None.
+
+    """
     try:
         LOGGER.debug('starting fetch queue worker')
         session = requests.Session()
         session.auth = (planet_api_key, '')
 
         while True:
-            dam_id = fetch_queue.get()
+            dam_id = download_queue.get()
             LOGGER.debug('about to fetch dam_id %s', dam_id)
             connection = sqlite3.connect(database_uri, uri=True)
             cursor = connection.cursor()
@@ -529,13 +544,14 @@ def main():
         ignore_path_list=[DATABASE_PATH],
         task_name='initialize database')
     task_graph.join()
+    ro_database_uri = 'file:%s?mode=ro' % DATABASE_PATH
+
     download_work_queue = queue.Queue(2)
     inference_queue = queue.Queue()
     schedule_worker_thread = threading.Thread(
         target=schedule_worker,
-        args=(download_work_queue, DATABASE_PATH,))
+        args=(download_work_queue, ro_database_uri,))
     schedule_worker_thread.start()
-    ro_database_uri = 'file:%s?mode=ro' % DATABASE_PATH
 
     # find the most recent mosaic we can use
     with open(PLANET_API_KEY_FILE, 'r') as planet_api_key_file:
@@ -577,12 +593,12 @@ def main():
         f"""https://api.planet.com/basemaps/v1/mosaics/"""
         f"""{active_mosaic['id']}/quads""")
 
-    fetch_worker_thread = threading.Thread(
-        target=fetch_worker,
+    download_worker_thread = threading.Thread(
+        target=download_worker,
         args=(
             download_work_queue, inference_queue, ro_database_uri,
             planet_api_key, mosaic_quad_list_url))
-    fetch_worker_thread.start()
+    download_worker_thread.start()
 
     bounding_box_queue = queue.Queue()
     inference_worker_thread = threading.Thread(
