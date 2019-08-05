@@ -171,6 +171,11 @@ def processing_status():
             cursor.fetchall()
         }
 
+        with SCHEDULED_GRID_IDS_LOCK:
+            for grid_id in SCHEDULED_GRID_IDS:
+                polygons_to_update[grid_id] = {
+                    'color': STATE_TO_COLOR['scheduled']}
+
         # count how many polygons just for reference
         cursor.execute(
             "SELECT count(grid_id) from grid_status;")
@@ -183,7 +188,7 @@ def processing_status():
             'polygons_to_update': polygons_to_update
         }
 
-        # add all the saptal analysis status
+        # add all the spatial analysis status
         for processing_state in STATE_TO_COLOR:
             cursor.execute(
                 "SELECT count(grid_id) from grid_status "
