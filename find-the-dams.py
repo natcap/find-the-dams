@@ -96,6 +96,7 @@ DATABASE_STATUS_STR = None
 GLOBAL_LOCK = None
 WORKING_GRID_ID_STATUS_MAP = None
 FRAGMENT_ID_STATUS_MAP = None
+IDENTIFIED_DAMS = None
 SESSION_UUID = None
 STATE_TO_COLOR = {
     'unscheduled': '#333333',
@@ -175,6 +176,10 @@ def processing_status():
         for grid_id, fragment_info in FRAGMENT_ID_STATUS_MAP.items():
             LOGGER.debug(fragment_info)
             polygons_to_update[grid_id] = fragment_info
+
+        for dam_id, dam_info in IDENTIFIED_DAMS.items():
+            LOGGER.debug(dam_info)
+            polygons_to_update[grid_id] = dam_info
 
         with GLOBAL_LOCK:
             for grid_id, status in WORKING_GRID_ID_STATUS_MAP.items():
@@ -579,14 +584,61 @@ def download_url_to_file(url, target_file_path):
         raise
 
 
-def inference_worker(inference_queue, bounding_box_queue):
-    """Take large tiles and search for dams."""
+def inference_worker(inference_queue, ro_database_uri):
+    """Take large tiles and search for dams.
+
+    Parameters:
+        inference_queue (queue): will get ('fragment_id', 'tile_path') tuples
+            where 'tile_path' is a path to a geotiff that can be searched
+            for dam bounding boxes.
+        ro_database_uri (str): URI to read-only version of database that's
+            used to search for pre-known dams.
+
+    """
     try:
+        wgs84_srs = osr.SpatialReference()
+        wgs84_srs.ImportFromEPSG(4326)
+        wgs84_wkt = wgs84_srs.ExportToWkt()
+        wgs84_srs = None
         while True:
             fragment_id, tile_path = inference_queue.get()
             LOGGER.debug('doing inference on %s', tile_path)
+            LOGGER.debug('search for dam bounding boxes in this region')
 
-            LOGGER.debug("TODO: start inference here, instead here's a placeholder")
+            tile_info = pygeoprocessing.get_raster_info(tile_path)
+            raster_wgs84_bb = pygeoprocessing.transform_bounding_box(
+                tile_info['bounding_box'], tile_info['projection'],
+                wgs84_wkt)
+
+            # search for any existing known dams
+            connection = sqlite3.connect(ro_database_uri, uri=True)
+            cursor = connection.cursor()
+            cursor.execute(
+                "SELECT dam_id, lat_min, lng_min, lat_max, lng_max "
+                "FROM identified_dams "
+                "WHERE "
+                'lat_min < ? AND '
+                'lng_min < ? AND '
+                'lat_max > ? AND '
+                'lng_max > ?;', (
+                    raster_wgs84_bb[1],
+                    raster_wgs84_bb[0],
+                    raster_wgs84_bb[3],
+                    raster_wgs84_bb[2]))
+
+            with GLOBAL_LOCK:
+                for (dam_id, lat_min, lng_min, lat_max, lng_max) in (
+                        cursor.fetchall()):
+                    IDENTIFIED_DAMS[dam_id] = {
+                        'color': STATE_TO_COLOR['complete'],
+                        'bounds': [
+                            [raster_wgs84_bb[1], raster_wgs84_bb[0]],
+                            [raster_wgs84_bb[3], raster_wgs84_bb[2]]],
+                    }
+                    LOGGER.debug("FOUND A DAM AT %s", raster_wgs84_bb)
+
+            LOGGER.debug(
+                "TODO: start inference here, instead here's a placeholder")
             bounding_box_queue.put(None)
             with GLOBAL_LOCK:
                 FRAGMENT_ID_STATUS_MAP[fragment_id]['color'] = (
@@ -671,7 +723,7 @@ def main():
     bounding_box_queue = queue.Queue()
     inference_worker_thread = threading.Thread(
         target=inference_worker,
-        args=(inference_queue, bounding_box_queue))
+        args=(inference_queue, ro_database_uri))
     inference_worker_thread.start()
 
     APP.run(host='0.0.0.0', port=8080)
@@ -683,5 +735,6 @@ if __name__ == '__main__':
     GLOBAL_LOCK = threading.Lock()
     WORKING_GRID_ID_STATUS_MAP = {}
     FRAGMENT_ID_STATUS_MAP = {}
+    IDENTIFIED_DAMS = {}
     SESSION_UUID = uuid.uuid4().hex
     main()
