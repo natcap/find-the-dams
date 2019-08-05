@@ -440,13 +440,28 @@ def schedule_worker(download_work_queue, readonly_database_uri):
             connection = sqlite3.connect(readonly_database_uri, uri=True)
             cursor = connection.cursor()
             # get a random grid but try South Africa first
-            cursor.execute(
+            query_string = (
                 'SELECT grid_id FROM grid_status '
-                'WHERE (country_list like "%South Africa%" '
-                'AND processing_state="unscheduled") '
-                'OR processing_state="unscheduled" '
-                'ORDER BY RANDOM() LIMIT 1;')
-            (grid_id,) = cursor.fetchone()
+                'WHERE country_list like "%South Africa%" '
+                'AND processing_state="unscheduled" '
+                'AND grid_id not in (' + ','.join([
+                    str(x) for x in WORKING_GRID_ID_STATUS_MAP.keys()]) +
+                ') ORDER BY RANDOM() LIMIT 1;')
+            LOGGER.debug(query_string)
+            cursor.execute(query_string)
+            payload = cursor.fetchone()
+            if payload:
+                grid_id = payload[0]
+            else:
+                # all the south africa dams have been in process, get one
+                # that's not
+                cursor.execute(
+                    'SELECT grid_id FROM grid_status '
+                    'WHERE processing_state="unscheduled" '
+                    'AND grid_id not in (' + ','.join([
+                        str(x) for x in WORKING_GRID_ID_STATUS_MAP.keys()]) +
+                    ') ORDER BY RANDOM() LIMIT 1;')
+                (grid_id,) = cursor.fetchone()
             LOGGER.debug('scheduling grid %s', grid_id)
             download_work_queue.put(grid_id)
             with WORKING_GRID_ID_STATUS_MAP_LOCK:
@@ -530,8 +545,6 @@ def download_worker(
                 WORKING_GRID_ID_STATUS_MAP[grid_id] = 'downloaded'
             cursor.close()
             connection.commit()
-
-            time.sleep(1)
     except Exception:
         LOGGER.exception('exception in fetch worker')
 
