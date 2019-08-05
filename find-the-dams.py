@@ -84,6 +84,8 @@ PLANET_API_KEY_FILE = 'planet_api_key.txt'
 ACTIVE_MOSAIC_JSON_PATH = os.path.join(WORKSPACE_DIR, 'active_mosaic.json')
 REQUEST_TIMEOUT = 5
 DATABASE_STATUS_STR = None
+SCHEDULED_GRID_IDS_LOCK = None
+SCHEDULED_GRID_IDS = None
 STATE_TO_COLOR = {
     'unscheduled': '#333333',
     'scheduled': '#FF3333',
@@ -402,9 +404,18 @@ def initalize_spatial_search_units(database_path, complete_token_path):
 
 
 def schedule_worker(download_work_queue, readonly_database_uri):
-    """Thread to schedule areas to prioritize."""
+    """Thread to schedule areas to prioritize.
+
+    Parameters:
+        download_work_queue (queue): this queue is used to communicate which
+            grid IDs should be scheduled for downloading next
+        readonly_database_uri (str): uri to readonly view of Sqlite3 database.
+
+    Returns:
+        None.
+
+    """
     try:
-        scheduled_grid_ids = set()
         LOGGER.debug('starting schedule worker')
         while True:
             connection = sqlite3.connect(readonly_database_uri, uri=True)
@@ -419,7 +430,8 @@ def schedule_worker(download_work_queue, readonly_database_uri):
             (grid_id,) = cursor.fetchone()
             LOGGER.debug('scheduling grid %s', grid_id)
             download_work_queue.put(grid_id)
-            scheduled_grid_ids.add(grid_id)
+            with SCHEDULED_GRID_IDS_LOCK:
+                SCHEDULED_GRID_IDS.add(grid_id)
             cursor.close()
             connection.commit()
     except Exception:
@@ -550,9 +562,10 @@ def main():
 
     download_work_queue = queue.Queue(2)
     inference_queue = queue.Queue()
+
     schedule_worker_thread = threading.Thread(
         target=schedule_worker,
-        args=(download_work_queue, ro_database_uri,))
+        args=(download_work_queue, ro_database_uri))
     schedule_worker_thread.start()
 
     # find the most recent mosaic we can use
@@ -613,4 +626,6 @@ def main():
 
 
 if __name__ == '__main__':
+    SCHEDULED_GRID_IDS_LOCK = threading.Lock()
+    SCHEDULED_GRID_IDS = set()
     main()
