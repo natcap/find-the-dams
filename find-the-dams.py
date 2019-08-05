@@ -639,11 +639,9 @@ def inference_worker(inference_queue, ro_database_uri):
 
             LOGGER.debug(
                 "TODO: start inference here, instead here's a placeholder")
-            bounding_box_queue.put(None)
             with GLOBAL_LOCK:
                 FRAGMENT_ID_STATUS_MAP[fragment_id]['color'] = (
                     STATE_TO_COLOR['analyzing'])
-            time.sleep(10)
     except Exception:
         LOGGER.exception("Exception in inference_worker")
 
