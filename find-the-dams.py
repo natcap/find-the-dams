@@ -487,9 +487,7 @@ def download_worker(
             mosaic_quad_response = get_bounding_box_quads(
                 session, mosaic_quad_list_url,
                 lng_min, lat_min, lng_max, lat_max)
-            LOGGER.debug(mosaic_quad_response)
             mosaic_quad_response_dict = mosaic_quad_response.json()
-            LOGGER.debug(mosaic_quad_response_dict)
             # download all the tiles that match
             for mosaic_item in mosaic_quad_response_dict['items']:
                 download_url = (mosaic_item['_links']['download'])
