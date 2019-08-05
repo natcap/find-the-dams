@@ -103,7 +103,8 @@
         $.post({
             url: '/processing_status',
             data: {
-                'last_update_tick': last_update_tick
+                'last_update_tick': last_update_tick,
+                'session_uuid': session_uuid,
             },
             dataType: 'json',
             success: function (data) {
