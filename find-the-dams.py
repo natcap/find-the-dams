@@ -128,15 +128,14 @@ def index():
 def processing_status():
     """Return results about polygons that are processing."""
     try:
-        last_update_tick = int(flask.request.form.get('last_update_tick'))
         client_uuid = str(flask.request.form.get('session_uuid'))
+        new_session = False
         if client_uuid != SESSION_UUID:
             # we have a new session, reset the remote
             LOGGER.debug(
                 '%s is not equal to %s uuid so resetting remote',
                 client_uuid, SESSION_UUID)
-            last_update_tick = -1
-        LOGGER.debug('last update tick %d', last_update_tick)
+            new_session = True
         payload = None
         polygons_to_update = {}
         LOGGER.debug(flask.request.form)
@@ -144,40 +143,25 @@ def processing_status():
         connection = sqlite3.connect(database_uri, uri=True)
         cursor = connection.cursor()
 
-        # get the history that hasn't been sent since the last query
-        cursor.execute(
-            'SELECT grid_id_list '
-            'FROM update_history '
-            'WHERE update_history.update_tick > ?', (last_update_tick,))
+        if new_session:
+            # fetch all grids
+            cursor.execute(
+                "SELECT grid_id, processing_state, lat_min, lng_min, lat_max, "
+                "lng_max FROM grid_status")
 
-        # build a unique set of changed polygons
-        polygon_update_id_tuple = tuple(set(itertools.chain(
-                *[pickle.loads(blob) for (blob,) in cursor.fetchall()])))
-        LOGGER.debug(polygon_update_id_tuple)
-
-        # get the current tick in the database
-        (current_update_tick,) = cursor.execute(
-            'SELECT max(update_tick) FROM update_history;').fetchone()
-
-        # fetch all polygons that have changed
-        cursor.execute(
-            "SELECT grid_id, processing_state, lat_min, lng_min, lat_max, "
-            "lng_max "
-            "FROM grid_status "
-            "WHERE grid_id in (" +
-            ','.join([str(x) for x in polygon_update_id_tuple]) + ")")
-
-        # construct a return object that indicated which polygons should be
-        # updated on the client
-        polygons_to_update = {
-            grid_id: {
-                'bounds': [[lat_min, lng_min], [lat_max, lng_max]],
-                'state': state,
-                'color': STATE_TO_COLOR[state]
-            } for (
-                grid_id, state, lat_min, lng_min, lat_max, lng_max) in
-            cursor.fetchall()
-        }
+            # construct a return object that indicated which polygons should be
+            # updated on the client
+            polygons_to_update = {
+                grid_id: {
+                    'bounds': [[lat_min, lng_min], [lat_max, lng_max]],
+                    'state': state,
+                    'color': STATE_TO_COLOR[state]
+                } for (
+                    grid_id, state, lat_min, lng_min, lat_max, lng_max) in
+                cursor.fetchall()
+            }
+        else:
+            polygons_to_update = {}
 
         with WORKING_GRID_ID_STATUS_MAP_LOCK:
             for grid_id, status in WORKING_GRID_ID_STATUS_MAP.items():
@@ -195,7 +179,6 @@ def processing_status():
         (n_processing_units,) = cursor.fetchone()
         # construct final payload
         payload = {
-            'last_update_tick': int(current_update_tick),
             'query_time': str(datetime.datetime.now()),
             'n_processing_units': n_processing_units,
             'polygons_to_update': polygons_to_update,
@@ -248,14 +231,6 @@ def initalize_spatial_search_units(database_path, complete_token_path):
     LOGGER.debug('launching initalize_spatial_search_units')
     create_database_sql = (
         """
-        CREATE TABLE update_history (
-            update_tick INTEGER NOT NULL PRIMARY KEY,
-            grid_id_list BLOB NOT NULL
-        );
-
-        CREATE INDEX update_tick_idx
-        ON update_history (update_tick);
-
         CREATE TABLE grid_status (
             grid_id INTEGER NOT NULL PRIMARY KEY,
             processing_state TEXT NOT NULL,
@@ -402,12 +377,6 @@ def initalize_spatial_search_units(database_path, complete_token_path):
 
     connection = sqlite3.connect(database_path)
     cursor = connection.cursor()
-
-    # indicate that the first tick is ALL the polygons being added
-    cursor.execute(
-        'INSERT INTO update_history(update_tick, grid_id_list) '
-        'VALUES(?, ?)', (0, pickle.dumps(
-            list(range(current_grid_id)))))
 
     cursor.executemany(
         'INSERT INTO grid_status( '
