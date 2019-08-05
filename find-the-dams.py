@@ -22,10 +22,7 @@ There are x steps:
 5) search imagery for dams w/ NN inference pipeline or Azure ML service
    pipeline?
     * this will involve breaking larger tiles into fragments to analyze
-    * these fragments will also be searched for *known* Ssession_uuidams
- SESSION_UUID:
- # we have a new session, reset the remote
- last_update_tick = -1
+    * these fragments will also be searched for *known* dams
 These are the states:
     * unscheduled (static state)
     * scheduled (volatile state)
@@ -135,6 +132,9 @@ def processing_status():
         client_uuid = str(flask.request.form.get('session_uuid'))
         if client_uuid != SESSION_UUID:
             # we have a new session, reset the remote
+            LOGGER.debug(
+                '%s is not equal to %s uuid so resetting remote',
+                client_uuid, SESSION_UUID)
             last_update_tick = -1
         LOGGER.debug('last update tick %d', last_update_tick)
         payload = None
@@ -484,17 +484,20 @@ def download_worker(
         LOGGER.debug('starting fetch queue worker')
         session = requests.Session()
         session.auth = (planet_api_key, '')
+        download_worker_task_graph = taskgraph.TaskGraph(
+            os.path.join(WORKSPACE_DIR, 'download_worker_taskgraph'))
 
         while True:
-            dam_id = download_queue.get()
-            LOGGER.debug('about to fetch dam_id %s', dam_id)
+            grid_id = download_queue.get()
+            LOGGER.debug('about to fetch grid_id %s', grid_id)
             connection = sqlite3.connect(database_uri, uri=True)
             cursor = connection.cursor()
             cursor.execute(
                 'SELECT processing_state, lat_min, lng_min, lat_max, lng_max '
                 'FROM grid_status '
-                'WHERE grid_id=?', (dam_id,))
-            (processing_state, lat_min, lng_min, lat_max, lng_max) = cursor.fetchone()
+                'WHERE grid_id=?', (grid_id,))
+            (processing_state, lat_min, lng_min, lat_max, lng_max) = (
+                cursor.fetchone())
             # find planet bounding boxes
             LOGGER.debug('fetching %s', (lat_min, lng_min, lat_max, lng_max))
             mosaic_quad_response = get_bounding_box_quads(
@@ -511,11 +514,19 @@ def download_worker(
                 download_raster_path = os.path.join(
                     planet_quads_dir, suffix_subdir,
                     f'{mosaic_item["id"]}.tif')
-                LOGGER.debug("# TODO: check database to ensure file wasn't already downloaded")
-                download_url_to_file(download_url, download_raster_path)
+                download_worker_task_graph.add_task(
+                    func=download_url_to_file,
+                    args=(download_url, download_raster_path),
+                    target_path_list=[download_raster_path],
+                    task_name='download %s' % os.path.basename(
+                        download_raster_path))
+                download_worker_task_graph.join()
                 LOGGER.debug('downloaded %s', download_url)
-                LOGGER.debug('# TODO: update the database to indicate file is downloaded')
                 inference_queue.put(download_raster_path)
+            LOGGER.debug(
+                '# TODO: update the status to indicate grid is downloaded')
+            with WORKING_GRID_ID_STATUS_MAP_LOCK:
+                WORKING_GRID_ID_STATUS_MAP[grid_id] = 'downloaded'
             cursor.close()
             connection.commit()
 
