@@ -84,8 +84,8 @@ PLANET_API_KEY_FILE = 'planet_api_key.txt'
 ACTIVE_MOSAIC_JSON_PATH = os.path.join(WORKSPACE_DIR, 'active_mosaic.json')
 REQUEST_TIMEOUT = 5
 DATABASE_STATUS_STR = None
-SCHEDULED_GRID_IDS_LOCK = None
-SCHEDULED_GRID_IDS = None
+WORKING_GRID_ID_STATUS_MAP_LOCK = None
+WORKING_GRID_ID_STATUS_MAP = None
 STATE_TO_COLOR = {
     'unscheduled': '#333333',
     'scheduled': '#FF3333',
@@ -171,10 +171,15 @@ def processing_status():
             cursor.fetchall()
         }
 
-        with SCHEDULED_GRID_IDS_LOCK:
-            for grid_id in SCHEDULED_GRID_IDS:
-                polygons_to_update[grid_id] = {
-                    'color': STATE_TO_COLOR['scheduled']}
+        with WORKING_GRID_ID_STATUS_MAP_LOCK:
+            for grid_id, status in WORKING_GRID_ID_STATUS_MAP.items():
+                if grid_id in polygons_to_update:
+                    polygons_to_update[grid_id]['color'] = (
+                        STATE_TO_COLOR[status])
+                else:
+                    polygons_to_update[grid_id] = {
+                        'color': STATE_TO_COLOR[status]
+                    }
 
         # count how many polygons just for reference
         cursor.execute(
@@ -435,8 +440,8 @@ def schedule_worker(download_work_queue, readonly_database_uri):
             (grid_id,) = cursor.fetchone()
             LOGGER.debug('scheduling grid %s', grid_id)
             download_work_queue.put(grid_id)
-            with SCHEDULED_GRID_IDS_LOCK:
-                SCHEDULED_GRID_IDS.add(grid_id)
+            with WORKING_GRID_ID_STATUS_MAP_LOCK:
+                WORKING_GRID_ID_STATUS_MAP[grid_id] = 'scheduled'
             cursor.close()
             connection.commit()
     except Exception:
@@ -631,6 +636,6 @@ def main():
 
 
 if __name__ == '__main__':
-    SCHEDULED_GRID_IDS_LOCK = threading.Lock()
-    SCHEDULED_GRID_IDS = set()
+    WORKING_GRID_ID_STATUS_MAP_LOCK = threading.Lock()
+    WORKING_GRID_ID_STATUS_MAP = {}
     main()
