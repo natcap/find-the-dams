@@ -485,7 +485,7 @@ def download_worker(
         session = requests.Session()
         session.auth = (planet_api_key, '')
         download_worker_task_graph = taskgraph.TaskGraph(
-            os.path.join(WORKSPACE_DIR, 'download_worker_taskgraph'))
+            os.path.join(WORKSPACE_DIR, 'download_worker_taskgraph'), -1)
 
         while True:
             grid_id = download_queue.get()
@@ -523,6 +523,7 @@ def download_worker(
                 download_worker_task_graph.join()
                 LOGGER.debug('downloaded %s', download_url)
                 inference_queue.put(download_raster_path)
+                break
             LOGGER.debug(
                 '# TODO: update the status to indicate grid is downloaded')
             with WORKING_GRID_ID_STATUS_MAP_LOCK:
