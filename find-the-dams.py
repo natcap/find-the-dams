@@ -10,14 +10,23 @@ There are x steps:
     * keep in memory in case there's a fault we can try again
     * schedule may be prioritized by regions, Lisa wants me to do ZA first
 3) download imagery
+    * check that chunk has not been inferred, if it has, skip
     * commit to database that imagery is downloaded so future scheduling can
       note this
+    * TODO: change the grid to show the polygon that has been downloaded
 4) fragment imagery into chunks that can be processed by the data inference
    pipeline
     * keep in memory in case there's fault and we can try again, we'll know
       approximately the % of processing for a grid to be done for reporting
     * when a chunk is complete, record:
         * the discovered bounding box and % of confidence for each bb
+    * record in database that the chunk has been inferred and need not be
+      redownloaded/processed.
+    * TODO: change the grid to show the polygon that is being processed for
+      for inference
+
+
+5) when an entire grid is complete
 
 5) search imagery for dams w/ NN inference pipeline or Azure ML service
    pipeline?
