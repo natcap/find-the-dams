@@ -82,7 +82,6 @@ WORKSPACE_DIR = 'workspace'
 DATABASE_PATH = os.path.join(WORKSPACE_DIR, 'find-the-dams.db')
 PLANET_API_KEY_FILE = 'planet_api_key.txt'
 ACTIVE_MOSAIC_JSON_PATH = os.path.join(WORKSPACE_DIR, 'active_mosaic.json')
-PLANET_QUADS_DIR = None
 REQUEST_TIMEOUT = 5
 DATABASE_STATUS_STR = None
 STATE_TO_COLOR = {
@@ -137,7 +136,7 @@ def processing_status():
 
         # get the history that hasn't been sent since the last query
         cursor.execute(
-            'SELECT polygon_id_list '
+            'SELECT grid_id_list '
             'FROM update_history '
             'WHERE update_history.update_tick > ?', (last_update_tick,))
 
@@ -152,26 +151,27 @@ def processing_status():
 
         # fetch all polygons that have changed
         cursor.execute(
-            "SELECT polygon_id, state, lat_min, lng_min, lat_max, lng_max "
-            "FROM spatial_analysis_units "
-            "WHERE polygon_id in (" +
+            "SELECT grid_id, processing_state, lat_min, lng_min, lat_max, "
+            "lng_max "
+            "FROM grid_status "
+            "WHERE grid_id in (" +
             ','.join([str(x) for x in polygon_update_id_tuple]) + ")")
 
         # construct a return object that indicated which polygons should be
         # updated on the client
         polygons_to_update = {
-            polygon_id: {
+            grid_id: {
                 'bounds': [[lat_min, lng_min], [lat_max, lng_max]],
                 'state': state,
                 'color': STATE_TO_COLOR[state]
             } for (
-                polygon_id, state, lat_min, lng_min, lat_max, lng_max) in
+                grid_id, state, lat_min, lng_min, lat_max, lng_max) in
             cursor.fetchall()
         }
 
         # count how many polygons just for reference
         cursor.execute(
-            "SELECT count(polygon_id) from spatial_analysis_units;")
+            "SELECT count(grid_id) from grid_status;")
         (n_processing_units,) = cursor.fetchone()
         # construct final payload
         payload = {
@@ -182,11 +182,11 @@ def processing_status():
         }
 
         # add all the saptal analysis status
-        for state in STATE_TO_COLOR:
+        for processing_state in STATE_TO_COLOR:
             cursor.execute(
-                "SELECT count(polygon_id) from spatial_analysis_units "
-                "WHERE state=?", (state,))
-            payload[state] = cursor.fetchone()[0]
+                "SELECT count(grid_id) from grid_status "
+                "WHERE processing_state=?", (processing_state,))
+            payload[processing_state] = cursor.fetchone()[0]
 
         cursor.close()
         connection.commit()
@@ -229,7 +229,7 @@ def initalize_spatial_search_units(database_path, complete_token_path):
         """
         CREATE TABLE update_history (
             update_tick INTEGER NOT NULL PRIMARY KEY,
-            polygon_id_list BLOB NOT NULL
+            grid_id_list BLOB NOT NULL
         );
 
         CREATE INDEX update_tick_idx
@@ -245,15 +245,15 @@ def initalize_spatial_search_units(database_path, complete_token_path):
             lng_max REAL NOT NULL);
 
         CREATE INDEX sa_lat_min_idx
-        ON spatial_analysis_units (lat_min);
+        ON grid_status (lat_min);
         CREATE INDEX sa_lng_min_idx
-        ON spatial_analysis_units (lng_min);
+        ON grid_status (lng_min);
         CREATE INDEX sa_lat_max_idx
-        ON spatial_analysis_units (lat_max);
+        ON grid_status (lat_max);
         CREATE INDEX sa_lng_max_idx
-        ON spatial_analysis_units (lng_max);
+        ON grid_status (lng_max);
         CREATE UNIQUE INDEX sa_id_idx
-        ON spatial_analysis_units (grid_id);
+        ON grid_status (grid_id);
 
         CREATE TABLE identified_dams (
             dam_id INTEGER NOT NULL PRIMARY KEY,
@@ -362,7 +362,7 @@ def initalize_spatial_search_units(database_path, complete_token_path):
 
     str_tree = shapely.strtree.STRtree(world_border_polygon_list)
     spatial_analysis_unit_list = []
-    current_polygon_id = 0
+    current_grid_id = 0
     # 66N to 56S lat because 66N is arctic circle and 56S is about how far
     # the land went down
     for lat in range(-56, 66):
@@ -375,22 +375,22 @@ def initalize_spatial_search_units(database_path, complete_token_path):
                     name_list.append(intersect_geom.country_name)
             if name_list:
                 spatial_analysis_unit_list.append(
-                    (current_polygon_id, 'unscheduled',
+                    (current_grid_id, 'unscheduled',
                      ','.join(name_list), lat, lng, lat+1, lng+1))
-                current_polygon_id += 1
+                current_grid_id += 1
 
     connection = sqlite3.connect(database_path)
     cursor = connection.cursor()
 
     # indicate that the first tick is ALL the polygons being added
     cursor.execute(
-        'INSERT INTO update_history(update_tick, polygon_id_list) '
+        'INSERT INTO update_history(update_tick, grid_id_list) '
         'VALUES(?, ?)', (0, pickle.dumps(
-            list(range(current_polygon_id)))))
+            list(range(current_grid_id)))))
 
     cursor.executemany(
         'INSERT INTO grid_status( '
-        'polygon_id, processing_state, country_list, '
+        'grid_id, processing_state, country_list, '
         'lat_min, lng_min, lat_max, lng_max) '
         'VALUES(?, ?, ?, ?, ?, ?, ?)', spatial_analysis_unit_list)
     cursor.close()
@@ -411,15 +411,15 @@ def schedule_worker(download_work_queue, readonly_database_uri):
             cursor = connection.cursor()
             # get a random grid but try South Africa first
             cursor.execute(
-                'SELECT grid_id FROM spatial_analysis_units '
+                'SELECT grid_id FROM grid_status '
                 'WHERE (country_list like "%South Africa%" '
-                'AND state="unscheduled") '
-                'OR state="unscheduled" '
+                'AND processing_state="unscheduled") '
+                'OR processing_state="unscheduled" '
                 'ORDER BY RANDOM() LIMIT 1;')
             (grid_id,) = cursor.fetchone()
             LOGGER.debug('scheduling grid %s', grid_id)
             download_work_queue.put(grid_id)
-            scheduled_grid_ids.add(scheduled_grid_ids)
+            scheduled_grid_ids.add(grid_id)
             cursor.close()
             connection.commit()
     except Exception:
@@ -460,10 +460,10 @@ def download_worker(
             connection = sqlite3.connect(database_uri, uri=True)
             cursor = connection.cursor()
             cursor.execute(
-                'SELECT state, lat_min, lng_min, lat_max, lng_max '
-                'FROM spatial_analysis_units '
-                'WHERE polygon_id=?', (dam_id,))
-            (state, lat_min, lng_min, lat_max, lng_max) = cursor.fetchone()
+                'SELECT processing_state, lat_min, lng_min, lat_max, lng_max '
+                'FROM grid_status '
+                'WHERE grid_id=?', (dam_id,))
+            (processing_state, lat_min, lng_min, lat_max, lng_max) = cursor.fetchone()
             # find planet bounding boxes
             LOGGER.debug('fetching %s', (lat_min, lng_min, lat_max, lng_max))
             mosaic_quad_response = get_bounding_box_quads(
@@ -478,10 +478,12 @@ def download_worker(
                 suffix_subdir = os.path.join(
                     *reversed(mosaic_item["id"][-4::]))
                 download_raster_path = os.path.join(
-                    PLANET_QUADS_DIR, suffix_subdir,
+                    planet_quads_dir, suffix_subdir,
                     f'{mosaic_item["id"]}.tif')
+                LOGGER.debug("# TODO: check database to ensure file wasn't already downloaded")
                 download_url_to_file(download_url, download_raster_path)
                 LOGGER.debug('downloaded %s', download_url)
+                LOGGER.debug('# TODO: update the database to indicate file is downloaded')
                 inference_queue.put(download_raster_path)
             cursor.close()
             connection.commit()
@@ -580,8 +582,7 @@ def main():
         with open(ACTIVE_MOSAIC_JSON_PATH, 'r') as active_mosaic_file:
             active_mosaic = json.load(active_mosaic_file)
 
-    global PLANET_QUADS_DIR
-    PLANET_QUADS_DIR = os.path.join(
+    planet_quads_dir = os.path.join(
         WORKSPACE_DIR, 'planet_quads_dir', active_mosaic['id'])
 
     LOGGER.debug(
@@ -597,7 +598,7 @@ def main():
         target=download_worker,
         args=(
             download_work_queue, inference_queue, ro_database_uri,
-            planet_api_key, mosaic_quad_list_url))
+            planet_api_key, mosaic_quad_list_url, planet_quads_dir))
     download_worker_thread.start()
 
     bounding_box_queue = queue.Queue()
