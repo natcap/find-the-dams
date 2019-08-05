@@ -46,13 +46,11 @@ These are the questions we can answer during processing:
     * what dams weren't detected? (i.e. a tile was processed with a dam in it
       that wasn't found)
 """
+import time
 import uuid
 import shutil
 import queue
 import threading
-import time
-import itertools
-import pickle
 import datetime
 import json
 import ast
@@ -62,10 +60,12 @@ import os
 import sys
 import logging
 
+import pygeoprocessing
 import requests
 import retrying
 import taskgraph
 from osgeo import gdal
+from osgeo import osr
 import shapely.prepared
 import shapely.ops
 import shapely.wkb
@@ -93,8 +93,9 @@ PLANET_API_KEY_FILE = 'planet_api_key.txt'
 ACTIVE_MOSAIC_JSON_PATH = os.path.join(WORKSPACE_DIR, 'active_mosaic.json')
 REQUEST_TIMEOUT = 5
 DATABASE_STATUS_STR = None
-WORKING_GRID_ID_STATUS_MAP_LOCK = None
+GLOBAL_LOCK = None
 WORKING_GRID_ID_STATUS_MAP = None
+FRAGMENT_ID_STATUS_MAP = None
 SESSION_UUID = None
 STATE_TO_COLOR = {
     'unscheduled': '#333333',
@@ -163,7 +164,6 @@ def processing_status():
             polygons_to_update = {
                 grid_id: {
                     'bounds': [[lat_min, lng_min], [lat_max, lng_max]],
-                    'state': state,
                     'color': STATE_TO_COLOR[state]
                 } for (
                     grid_id, state, lat_min, lng_min, lat_max, lng_max) in
@@ -172,7 +172,11 @@ def processing_status():
         else:
             polygons_to_update = {}
 
-        with WORKING_GRID_ID_STATUS_MAP_LOCK:
+        for grid_id, fragment_info in FRAGMENT_ID_STATUS_MAP.items():
+            LOGGER.debug(fragment_info)
+            polygons_to_update[grid_id] = fragment_info
+
+        with GLOBAL_LOCK:
             for grid_id, status in WORKING_GRID_ID_STATUS_MAP.items():
                 if grid_id in polygons_to_update:
                     polygons_to_update[grid_id]['color'] = (
@@ -442,7 +446,7 @@ def schedule_worker(download_work_queue, readonly_database_uri):
                 (grid_id,) = cursor.fetchone()
             LOGGER.debug('scheduling grid %s', grid_id)
             download_work_queue.put(grid_id)
-            with WORKING_GRID_ID_STATUS_MAP_LOCK:
+            with GLOBAL_LOCK:
                 WORKING_GRID_ID_STATUS_MAP[grid_id] = 'scheduled'
             cursor.close()
             connection.commit()
@@ -474,11 +478,17 @@ def download_worker(
 
     """
     try:
+        global FRAGMENT_ID_STATUS_MAP
         LOGGER.debug('starting fetch queue worker')
         session = requests.Session()
         session.auth = (planet_api_key, '')
         download_worker_task_graph = taskgraph.TaskGraph(
             os.path.join(WORKSPACE_DIR, 'download_worker_taskgraph'), -1)
+
+        wgs84_srs = osr.SpatialReference()
+        wgs84_srs.ImportFromEPSG(4326)
+        wgs84_wkt = wgs84_srs.ExportToWkt()
+        wgs84_srs = None
 
         while True:
             grid_id = download_queue.get()
@@ -512,12 +522,30 @@ def download_worker(
                     task_name='download %s' % os.path.basename(
                         download_raster_path))
                 download_worker_task_graph.join()
+
+                # get bounding box for mosaic
+                # make a new entry in the FRAGMENT_ID_STATUS_MAP
+                raster_info = pygeoprocessing.get_raster_info(
+                    download_raster_path)
+                raster_wgs84_bb = pygeoprocessing.transform_bounding_box(
+                    raster_info['bounding_box'], raster_info['projection'],
+                    wgs84_wkt)
+
+                fragment_id = '%s_%s' % (grid_id, mosaic_item['id'])
+                LOGGER.debug(raster_info)
+                with GLOBAL_LOCK:
+                    FRAGMENT_ID_STATUS_MAP[fragment_id] = {
+                        'bounds':
+                            [[raster_wgs84_bb[1], raster_wgs84_bb[0]],
+                             [raster_wgs84_bb[3], raster_wgs84_bb[2]]],
+                        'color': STATE_TO_COLOR['downloaded']
+                    }
+
                 LOGGER.debug('downloaded %s', download_url)
-                inference_queue.put(download_raster_path)
-                break
+                inference_queue.put((fragment_id, download_raster_path))
             LOGGER.debug(
                 '# TODO: update the status to indicate grid is downloaded')
-            with WORKING_GRID_ID_STATUS_MAP_LOCK:
+            with GLOBAL_LOCK:
                 WORKING_GRID_ID_STATUS_MAP[grid_id] = 'downloaded'
             cursor.close()
             connection.commit()
@@ -555,9 +583,15 @@ def inference_worker(inference_queue, bounding_box_queue):
     """Take large tiles and search for dams."""
     try:
         while True:
-            tile_path = inference_queue.get()
+            fragment_id, tile_path = inference_queue.get()
             LOGGER.debug('doing inference on %s', tile_path)
+
+            LOGGER.debug("TODO: start inference here, instead here's a placeholder")
             bounding_box_queue.put(None)
+            with GLOBAL_LOCK:
+                FRAGMENT_ID_STATUS_MAP[fragment_id]['analyzing'] = (
+                    STATE_TO_COLOR['analyzing'])
+            time.sleep(10)
     except Exception:
         LOGGER.exception("Exception in inference_worker")
 
@@ -646,7 +680,8 @@ def main():
 
 
 if __name__ == '__main__':
-    WORKING_GRID_ID_STATUS_MAP_LOCK = threading.Lock()
+    GLOBAL_LOCK = threading.Lock()
     WORKING_GRID_ID_STATUS_MAP = {}
+    FRAGMENT_ID_STATUS_MAP = {}
     SESSION_UUID = uuid.uuid4().hex
     main()
