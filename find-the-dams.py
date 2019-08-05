@@ -22,8 +22,10 @@ There are x steps:
 5) search imagery for dams w/ NN inference pipeline or Azure ML service
    pipeline?
     * this will involve breaking larger tiles into fragments to analyze
-    * these fragments will also be searched for *known* dams
-
+    * these fragments will also be searched for *known* Ssession_uuidams
+ SESSION_UUID:
+ # we have a new session, reset the remote
+ last_update_tick = -1
 These are the states:
     * unscheduled (static state)
     * scheduled (volatile state)
@@ -38,6 +40,7 @@ These are the questions we can answer during processing:
     * what dams weren't detected? (i.e. a tile was processed with a dam in it
       that wasn't found)
 """
+import uuid
 import shutil
 import queue
 import threading
@@ -86,6 +89,7 @@ REQUEST_TIMEOUT = 5
 DATABASE_STATUS_STR = None
 WORKING_GRID_ID_STATUS_MAP_LOCK = None
 WORKING_GRID_ID_STATUS_MAP = None
+SESSION_UUID = None
 STATE_TO_COLOR = {
     'unscheduled': '#333333',
     'scheduled': '#FF3333',
@@ -128,6 +132,10 @@ def processing_status():
     """Return results about polygons that are processing."""
     try:
         last_update_tick = int(flask.request.form.get('last_update_tick'))
+        client_uuid = str(flask.request.form.get('session_uuid'))
+        if client_uuid != SESSION_UUID:
+            # we have a new session, reset the remote
+            last_update_tick = -1
         LOGGER.debug('last update tick %d', last_update_tick)
         payload = None
         polygons_to_update = {}
@@ -190,7 +198,8 @@ def processing_status():
             'last_update_tick': int(current_update_tick),
             'query_time': str(datetime.datetime.now()),
             'n_processing_units': n_processing_units,
-            'polygons_to_update': polygons_to_update
+            'polygons_to_update': polygons_to_update,
+            'session_uuid': SESSION_UUID,
         }
 
         # add all the spatial analysis status
@@ -638,4 +647,5 @@ def main():
 if __name__ == '__main__':
     WORKING_GRID_ID_STATUS_MAP_LOCK = threading.Lock()
     WORKING_GRID_ID_STATUS_MAP = {}
+    SESSION_UUID = uuid.uuid4().hex
     main()
