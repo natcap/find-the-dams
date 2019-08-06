@@ -174,7 +174,6 @@ def processing_status():
             polygons_to_update = {}
 
         for grid_id, fragment_info in FRAGMENT_ID_STATUS_MAP.items():
-            LOGGER.debug(fragment_info)
             polygons_to_update[grid_id] = fragment_info
 
         for dam_id, dam_info in IDENTIFIED_DAMS.items():
@@ -617,10 +616,10 @@ def inference_worker(inference_queue, ro_database_uri):
                 "SELECT dam_id, lat_min, lng_min, lat_max, lng_max "
                 "FROM identified_dams "
                 "WHERE "
-                'lat_min < ? AND '
-                'lng_min < ? AND '
-                'lat_max > ? AND '
-                'lng_max > ?;', (
+                'lat_min > ? AND '
+                'lng_min > ? AND '
+                'lat_max < ? AND '
+                'lng_max < ?;', (
                     raster_wgs84_bb[1],
                     raster_wgs84_bb[0],
                     raster_wgs84_bb[3],
