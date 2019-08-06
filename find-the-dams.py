@@ -631,8 +631,8 @@ def inference_worker(inference_queue, ro_database_uri):
                     IDENTIFIED_DAMS[dam_id] = {
                         'color': STATE_TO_COLOR['complete'],
                         'bounds': [
-                            [raster_wgs84_bb[1], raster_wgs84_bb[0]],
-                            [raster_wgs84_bb[3], raster_wgs84_bb[2]]],
+                            [lng_min, lat_min],
+                            [lng_max, lat_max]],
                     }
                     LOGGER.debug("FOUND A DAM AT %s", raster_wgs84_bb)
 
