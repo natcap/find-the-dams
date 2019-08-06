@@ -173,14 +173,13 @@ def processing_status():
         else:
             polygons_to_update = {}
 
-        for grid_id, fragment_info in FRAGMENT_ID_STATUS_MAP.items():
-            polygons_to_update[grid_id] = fragment_info
-
-        for dam_id, dam_info in IDENTIFIED_DAMS.items():
-            LOGGER.debug(dam_info)
-            polygons_to_update[grid_id] = dam_info
-
         with GLOBAL_LOCK:
+            for grid_id, fragment_info in FRAGMENT_ID_STATUS_MAP.items():
+                polygons_to_update[grid_id] = fragment_info
+
+            for dam_id, dam_info in IDENTIFIED_DAMS.items():
+                LOGGER.debug(dam_info)
+                polygons_to_update[dam_id] = dam_info
             for grid_id, status in WORKING_GRID_ID_STATUS_MAP.items():
                 if grid_id in polygons_to_update:
                     polygons_to_update[grid_id]['color'] = (
@@ -628,11 +627,12 @@ def inference_worker(inference_queue, ro_database_uri):
             with GLOBAL_LOCK:
                 for (dam_id, lat_min, lng_min, lat_max, lng_max) in (
                         cursor.fetchall()):
-                    IDENTIFIED_DAMS[dam_id] = {
+                    fragment_dam_id = '%s_%s' % (fragment_id, dam_id)
+                    IDENTIFIED_DAMS[fragment_dam_id] = {
                         'color': STATE_TO_COLOR['complete'],
                         'bounds': [
-                            [lng_min, lat_min],
-                            [lng_max, lat_max]],
+                            [lat_min, lng_min],
+                            [lat_max, lng_max]],
                     }
                     LOGGER.debug("FOUND A DAM AT %s", raster_wgs84_bb)
 
@@ -717,7 +717,6 @@ def main():
             planet_api_key, mosaic_quad_list_url, planet_quads_dir))
     download_worker_thread.start()
 
-    bounding_box_queue = queue.Queue()
     inference_worker_thread = threading.Thread(
         target=inference_worker,
         args=(inference_queue, ro_database_uri))
