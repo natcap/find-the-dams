@@ -722,7 +722,7 @@ def main():
         args=(inference_queue, ro_database_uri))
     inference_worker_thread.start()
 
-    APP.run(host='0.0.0.0', port=8080)
+    APP.run(host='0.0.0.0', port=80)
     task_graph.close()
     schedule_worker_thread.join()
 
