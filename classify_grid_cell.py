@@ -101,6 +101,9 @@ def process_quad():
             return str(ACTIVE_QUAD)
     except Exception as e:
         LOGGER.exception('something bad happened')
+        with APP_LOCK:
+            PROCESSING_REQUEST = False
+            ACTIVE_QUAD = None
         return e.msg, 500
 
 
