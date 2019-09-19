@@ -36,7 +36,6 @@ REQUEST_TIMEOUT = 5.0
 PROCESSING_REQUEST = False
 ACTIVE_QUAD = None
 MOSAIC_QUAD_LIST_URL = None
-THRESHOLD_LEVEL = 0.3
 DICE_SIZE = (419, 419)
 
 APP = Flask(
@@ -96,7 +95,8 @@ def process_quad():
             ACTIVE_QUAD = (lat_min, lng_min, lat_max, lng_max)
 
             quad_worker_thread = threading.Thread(
-                target=quad_worker, args=(ACTIVE_QUAD + (TF_GRAPH,)))
+                target=quad_worker, args=(
+                    ACTIVE_QUAD + (request_json['threshold'], TF_GRAPH,)))
             quad_worker_thread.start()
             return str(ACTIVE_QUAD)
     except Exception as e:
@@ -203,7 +203,8 @@ def get_bounding_box_quads(
         raise
 
 
-def quad_worker(lat_min, lng_min, lat_max, lng_max, tf_graph):
+def quad_worker(
+        lat_min, lng_min, lat_max, lng_max, threshold_Level, tf_graph):
     """Fetch Planet tiles as requested.
 
     Parameters:
@@ -219,6 +220,8 @@ def quad_worker(lat_min, lng_min, lat_max, lng_max, tf_graph):
         planet_quads_dir (str): directory to save downloaded planet tiles in.
             This function will make tree-like subdirectories under the main
             directory based off the last 3 characters of the tile filename.
+        threshold_level (float): confidence threshold to cut off
+            classification.
         tf_graph (tensorflow graph): tensorflow graph used for inference.
 
     Returns:
@@ -252,7 +255,7 @@ def quad_worker(lat_min, lng_min, lat_max, lng_max, tf_graph):
         _ = quad_worker_task_graph.add_task(
             func=inference_on_quad,
             args=(
-                download_raster_path, tf_graph, THRESHOLD_LEVEL, DICE_SIZE,
+                download_raster_path, tf_graph, threshold_Level, DICE_SIZE,
                 WORKSPACE_DIR),
             dependent_task_list=[download_task],
             task_name='inference on quad %s' % os.path.basename(
