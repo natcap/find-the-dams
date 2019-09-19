@@ -114,9 +114,16 @@ def do_detection(detection_graph, image_path):
         None.
 
     """
-    image = PIL.Image.open(image_path).convert("RGB")
-    image.show()
-    image_array = numpy.array(image)
+    base_array = gdal.Open(image_path).ReadAsArray().astype(numpy.uint8)
+    image_array = numpy.dstack(
+        [base_array[0, :, :],
+         base_array[1, :, :],
+         base_array[2, :, :]])
+
+    LOGGER.debug(image_array.shape)
+    LOGGER.debug(image_array)
+    image = PIL.Image.fromarray(image_array).convert("RGB")
+    #image_array = numpy.array(image)
 
     with detection_graph.as_default():
         with tf.Session(graph=detection_graph) as sess:
@@ -145,7 +152,7 @@ def do_detection(detection_graph, image_path):
                 LOGGER.debug((box, coords, image_array.shape))
                 image_draw.rectangle(coords, outline='RED')
             del image_draw
-            image.save('bb.png')
+            image.save('%s.png' % os.path.splitext(image_path)[0])
 
 
 @retrying.retry(wait_exponential_multiplier=1000, wait_exponential_max=10000)
@@ -170,7 +177,8 @@ def download_url_to_file(url, target_file_path):
             shutil.copyfileobj(response.raw, target_file)
         del response
     except Exception:
-        LOGGER.exception(f"download of {url} to {target_file_path} failed")
+        LOGGER.exception(
+            "download of %s  to %s failed", url, target_file_path)
         raise
 
 
@@ -180,12 +188,14 @@ def get_bounding_box_quads(
     """Query for mosaic via bounding box and retry if necessary."""
     try:
         mosaic_quad_response = session.get(
-            f'{mosaic_quad_list_url}?bbox={min_x},{min_y},{max_x},{max_y}',
+            '%s?bbox=%s,%s,%s,%s,' % (
+                mosaic_quad_list_url, min_x, min_y, max_x, max_y),
             timeout=REQUEST_TIMEOUT)
         return mosaic_quad_response
     except Exception:
         LOGGER.exception(
-            f"get_bounding_box_quads {min_x},{min_y},{max_x},{max_y} failed")
+            "get_bounding_box_quads %s, %s, %s, %s failed",
+            min_x, min_y, max_x, max_y)
         raise
 
 
@@ -227,8 +237,7 @@ def quad_worker(lat_min, lng_min, lat_max, lng_max):
         suffix_subdir = os.path.join(
             *reversed(mosaic_item["id"][-4::]))
         download_raster_path = os.path.join(
-            planet_quads_dir, suffix_subdir,
-            f'{mosaic_item["id"]}.tif')
+            planet_quads_dir, suffix_subdir, '%s.tif' % mosaic_item["id"])
         download_task = quad_worker_task_graph.add_task(
             func=download_url_to_file,
             args=(download_url, download_raster_path),
@@ -299,7 +308,7 @@ def inference_on_quad(
                 quad_raster_path, raster_info['pixel_size'],
                 clipped_raster_path, 'near',
                 target_bb=[xmin, ymin, xmax, ymax])
-            #do_detection(tf_graph, clipped_raster_path)
+            do_detection(tf_graph, clipped_raster_path)
 
 
 if __name__ == '__main__':
@@ -334,13 +343,14 @@ if __name__ == '__main__':
         WORKSPACE_DIR, 'planet_quads_dir', active_mosaic['id'])
 
     LOGGER.debug(
-        'using this mosaic: '
-        f"""{active_mosaic['last_acquired']} {active_mosaic['interval']} {
-            active_mosaic['grid']['resolution']}""")
+        'using this mosaic: %s %s %s',
+        active_mosaic['last_acquired'],
+        active_mosaic['interval'],
+        active_mosaic['grid']['resolution'])
 
     MOSAIC_QUAD_LIST_URL = (
-        f"""https://api.planet.com/basemaps/v1/mosaics/"""
-        f"""{active_mosaic['id']}/quads""")
+        "https://api.planet.com/basemaps/v1/mosaics/%s/quads" % (
+            active_mosaic['id']))
 
     APP_LOCK = threading.Lock()
     APP.run(host='0.0.0.0', port=8080)
