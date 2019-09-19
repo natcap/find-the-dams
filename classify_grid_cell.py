@@ -36,7 +36,7 @@ REQUEST_TIMEOUT = 5.0
 PROCESSING_REQUEST = False
 ACTIVE_QUAD = None
 MOSAIC_QUAD_LIST_URL = None
-THRESHOLD_LEVEL = 0.5
+THRESHOLD_LEVEL = 0.3
 DICE_SIZE = (419, 419)
 
 APP = Flask(
@@ -49,6 +49,7 @@ logging.basicConfig(
         ' [%(funcName)s:%(lineno)d] %(message)s'),
     stream=sys.stdout)
 LOGGER = logging.getLogger(__name__)
+LOGGER.addHandler(logging.FileHandler('%s_log.txt' % __name__))
 
 
 def load_model(path_to_model):
@@ -78,6 +79,7 @@ def process_quad():
     try:
         global PROCESSING_REQUEST
         global ACTIVE_QUAD
+        global TF_GRAPH
         with APP_LOCK:
             if PROCESSING_REQUEST:
                 return (
@@ -94,7 +96,7 @@ def process_quad():
             ACTIVE_QUAD = (lat_min, lng_min, lat_max, lng_max)
 
             quad_worker_thread = threading.Thread(
-                target=quad_worker, args=ACTIVE_QUAD)
+                target=quad_worker, args=(ACTIVE_QUAD + (TF_GRAPH,)))
             quad_worker_thread.start()
             return str(ACTIVE_QUAD)
     except Exception as e:
@@ -102,12 +104,14 @@ def process_quad():
         return e.msg, 500
 
 
-def do_detection(detection_graph, image_path):
+def do_detection(detection_graph, threshold_level, image_path):
     """Detect whatever the graph is supposed to detect on a single image.
 
     Parameters:
         detection_graph (tensorflow Graph): a loaded graph that can accept
             images of the size in `image_path`.
+        threshold_level (float): the confidence threshold level to cut off
+            classification
         image_path (str): path to an image that `detection_graph` can parse.
 
     Returns:
@@ -142,7 +146,7 @@ def do_detection(detection_graph, image_path):
             image_draw = PIL.ImageDraw.Draw(image)
             for box, score in zip(box_list[0], score_list[0]):
                 LOGGER.debug((box, score))
-                if score <= 0.0:
+                if score < threshold_level:
                     break
                 coords = (
                     (box[1] * image_array.shape[1],
@@ -199,7 +203,7 @@ def get_bounding_box_quads(
         raise
 
 
-def quad_worker(lat_min, lng_min, lat_max, lng_max):
+def quad_worker(lat_min, lng_min, lat_max, lng_max, tf_graph):
     """Fetch Planet tiles as requested.
 
     Parameters:
@@ -215,6 +219,7 @@ def quad_worker(lat_min, lng_min, lat_max, lng_max):
         planet_quads_dir (str): directory to save downloaded planet tiles in.
             This function will make tree-like subdirectories under the main
             directory based off the last 3 characters of the tile filename.
+        tf_graph (tensorflow graph): tensorflow graph used for inference.
 
     Returns:
         None.
@@ -247,7 +252,7 @@ def quad_worker(lat_min, lng_min, lat_max, lng_max):
         _ = quad_worker_task_graph.add_task(
             func=inference_on_quad,
             args=(
-                download_raster_path, MODEL_PATH, THRESHOLD_LEVEL, DICE_SIZE,
+                download_raster_path, tf_graph, THRESHOLD_LEVEL, DICE_SIZE,
                 WORKSPACE_DIR),
             dependent_task_list=[download_task],
             task_name='inference on quad %s' % os.path.basename(
@@ -262,14 +267,14 @@ def quad_worker(lat_min, lng_min, lat_max, lng_max):
 
 
 def inference_on_quad(
-        quad_raster_path, frozen_tf_path, threshold_level, dice_size,
+        quad_raster_path, tf_graph, threshold_level, dice_size,
         workspace_dir):
     """Run TensorFlow inference on a given quad.
 
     Parameters:
         quad_raster_path (str): path to a GeoTIFF to search for objects
-            recognized by `frozen_tf_path`.
-        frozen_tf_path (str): path to a frozen TensorFlow graph used for
+            recognized by `tf_graph`.
+        tf_graph (tensorflow graph): active TensorFlow graph used for
             object detection.
         threshold_level (float): a number between 0..1 indicating what
             "confidence level" from the TF graph to set as a recognized
@@ -283,7 +288,6 @@ def inference_on_quad(
         None.
 
     """
-    tf_graph = load_model(frozen_tf_path)
     try:
         os.makedirs(workspace_dir)
     except OSError:
@@ -308,7 +312,7 @@ def inference_on_quad(
                 quad_raster_path, raster_info['pixel_size'],
                 clipped_raster_path, 'near',
                 target_bb=[xmin, ymin, xmax, ymax])
-            do_detection(tf_graph, clipped_raster_path)
+            do_detection(tf_graph, threshold_level, clipped_raster_path)
 
 
 if __name__ == '__main__':
@@ -352,6 +356,7 @@ if __name__ == '__main__':
         "https://api.planet.com/basemaps/v1/mosaics/%s/quads" % (
             active_mosaic['id']))
 
+    TF_GRAPH = load_model(MODEL_PATH)
     APP_LOCK = threading.Lock()
     APP.run(host='0.0.0.0', port=8080)
 
