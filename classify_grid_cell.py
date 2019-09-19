@@ -5,9 +5,9 @@ import logging
 import os
 import threading
 import ast
+import shutil
 
 import pygeoprocessing
-import shutil
 import retrying
 import requests
 import taskgraph
@@ -36,7 +36,7 @@ REQUEST_TIMEOUT = 5.0
 PROCESSING_REQUEST = False
 ACTIVE_QUAD = None
 MOSAIC_QUAD_LIST_URL = None
-THRESHOLD_LEVEL = 0.2
+THRESHOLD_LEVEL = 0.5
 DICE_SIZE = (419, 419)
 
 APP = Flask(

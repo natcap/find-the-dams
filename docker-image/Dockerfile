@@ -27,3 +27,4 @@ RUN hg clone http://bitbucket.org/natcap/pygeoprocessing
 WORKDIR pygeoprocessing
 RUN hg update develop
 RUN /bin/bash -c "conda run -v -n py37 python3 setup.py install"
+RUN /bin/bash -c "conda run -v -n py37 pip install tensorflow retrying requests taskgraph flask pillow"
