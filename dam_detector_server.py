@@ -1,5 +1,5 @@
 # coding=UTF-8
-"""Processing Pipeline and Dashboard to Search for dams on global imagery.
+"""This server will pull unclassified tiles and attempt to find dams in them.
 
 There are x steps:
 0) check to see if anything was interrupted on the last run
@@ -46,7 +46,6 @@ These are the questions we can answer during processing:
     * what dams weren't detected? (i.e. a tile was processed with a dam in it
       that wasn't found)
 """
-import time
 import uuid
 import shutil
 import queue
@@ -60,6 +59,8 @@ import os
 import sys
 import logging
 
+import ecoshard
+import numpy
 import pygeoprocessing
 import requests
 import retrying
@@ -72,6 +73,10 @@ import shapely.wkb
 import shapely.strtree
 from flask import Flask
 import flask
+import tensorflow as tf
+import PIL
+import PIL.ImageDraw
+
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -95,6 +100,8 @@ DATABASE_PATH = os.path.join(WORKSPACE_DIR, 'find-the-dams.db')
 PLANET_API_KEY_FILE = 'planet_api_key.txt'
 ACTIVE_MOSAIC_JSON_PATH = os.path.join(WORKSPACE_DIR, 'active_mosaic.json')
 REQUEST_TIMEOUT = 5
+DICE_SIZE = (419, 419)  # how to dice global quads.
+THRESHOLD_LEVEL = 0.08
 DATABASE_STATUS_STR = None
 GLOBAL_LOCK = None
 WORKING_GRID_ID_STATUS_MAP = None
@@ -117,6 +124,7 @@ NEXT_STATE = {
 }
 
 APP = Flask(__name__, static_url_path='', static_folder='')
+
 
 @APP.route('/favicon.ico')
 def favicon():
@@ -585,7 +593,7 @@ def download_url_to_file(url, target_file_path):
         raise
 
 
-def inference_worker(inference_queue, ro_database_uri):
+def inference_worker(inference_queue, ro_database_uri, tf_model_path):
     """Take large tiles and search for dams.
 
     Parameters:
@@ -597,55 +605,134 @@ def inference_worker(inference_queue, ro_database_uri):
 
     """
     try:
+        tf_graph = load_model(tf_model_path)
         wgs84_srs = osr.SpatialReference()
         wgs84_srs.ImportFromEPSG(4326)
-        wgs84_wkt = wgs84_srs.ExportToWkt()
-        wgs84_srs = None
         while True:
             fragment_id, tile_path = inference_queue.get()
             LOGGER.debug('doing inference on %s', tile_path)
             LOGGER.debug('search for dam bounding boxes in this region')
 
-            tile_info = pygeoprocessing.get_raster_info(tile_path)
-            raster_wgs84_bb = pygeoprocessing.transform_bounding_box(
-                tile_info['bounding_box'], tile_info['projection'],
-                wgs84_wkt)
+            raster_info = pygeoprocessing.get_raster_info(tile_path)
+            x_size, y_size = raster_info['raster_size']
+            for i_off in range(0, x_size, DICE_SIZE[0]):
+                for j_off in range(0, y_size, DICE_SIZE[1]):
+                    ul_corner = gdal.ApplyGeoTransform(
+                        raster_info['geotransform'], i_off, j_off)
+                    lr_corner = gdal.ApplyGeoTransform(
+                        raster_info['geotransform'],
+                        i_off+DICE_SIZE[0], j_off+DICE_SIZE[1])
+                    xmin, xmax = sorted([ul_corner[0], lr_corner[0]])
+                    ymin, ymax = sorted([ul_corner[1], lr_corner[1]])
 
-            # search for any existing known dams
-            connection = sqlite3.connect(ro_database_uri, uri=True)
-            cursor = connection.cursor()
-            cursor.execute(
-                "SELECT dam_id, lat_min, lng_min, lat_max, lng_max "
-                "FROM identified_dams "
-                "WHERE "
-                'lat_min > ? AND '
-                'lng_min > ? AND '
-                'lat_max < ? AND '
-                'lng_max < ?;', (
-                    raster_wgs84_bb[1],
-                    raster_wgs84_bb[0],
-                    raster_wgs84_bb[3],
-                    raster_wgs84_bb[2]))
+                    clipped_raster_path = os.path.join(
+                        WORKSPACE_DIR, '%d_%d.tif' % (i_off, j_off))
+                    LOGGER.debug("clip to %s", [xmin, ymin, xmax, ymax])
+                    pygeoprocessing.warp_raster(
+                        tile_path, raster_info['pixel_size'],
+                        clipped_raster_path, 'near',
+                        target_bb=[xmin, ymin, xmax, ymax])
+                    # TODO: get the list of bb coords here and then make
+                    # a transformed lat/lng bounding box and also save the
+                    # image file somewhere and also make an entry in the
+                    # database
+                    do_detection(
+                        tf_graph, THRESHOLD_LEVEL, clipped_raster_path)
 
-            with GLOBAL_LOCK:
-                for (dam_id, lat_min, lng_min, lat_max, lng_max) in (
-                        cursor.fetchall()):
-                    fragment_dam_id = '%s_%s' % (fragment_id, dam_id)
-                    IDENTIFIED_DAMS[fragment_dam_id] = {
-                        'color': STATE_TO_COLOR['complete'],
-                        'bounds': [
-                            [lat_min, lng_min],
-                            [lat_max, lng_max]],
-                    }
-                    LOGGER.debug("FOUND A DAM AT %s", raster_wgs84_bb)
+            # TODO: write code here to highlight where a dam was found
+            # with GLOBAL_LOCK:
+            #     for (dam_id, lat_min, lng_min, lat_max, lng_max) in (
+            #             cursor.fetchall()):
+            #         fragment_dam_id = '%s_%s' % (fragment_id, dam_id)
+            #         IDENTIFIED_DAMS[fragment_dam_id] = {
+            #             'color': STATE_TO_COLOR['complete'],
+            #             'bounds': [
+            #                 [lat_min, lng_min],
+            #                 [lat_max, lng_max]],
+            #         }
+            #         LOGGER.debug("FOUND A DAM AT %s", raster_wgs84_bb)
 
-            LOGGER.debug(
-                "TODO: start inference here, instead here's a placeholder")
             with GLOBAL_LOCK:
                 FRAGMENT_ID_STATUS_MAP[fragment_id]['color'] = (
                     STATE_TO_COLOR['analyzing'])
     except Exception:
         LOGGER.exception("Exception in inference_worker")
+
+
+def do_detection(detection_graph, threshold_level, image_path):
+    """Detect whatever the graph is supposed to detect on a single image.
+
+    Parameters:
+        detection_graph (tensorflow Graph): a loaded graph that can accept
+            images of the size in `image_path`.
+        threshold_level (float): the confidence threshold level to cut off
+            classification
+        image_path (str): path to an image that `detection_graph` can parse.
+
+    Returns:
+        None.
+
+    """
+    base_array = gdal.Open(image_path).ReadAsArray().astype(numpy.uint8)
+    image_array = numpy.dstack(
+        [base_array[0, :, :],
+         base_array[1, :, :],
+         base_array[2, :, :]])
+
+    LOGGER.debug(image_array.shape)
+    LOGGER.debug(image_array)
+    image = PIL.Image.fromarray(image_array).convert("RGB")
+
+    with detection_graph.as_default():
+        with tf.Session(graph=detection_graph) as sess:
+            image_array_expanded = numpy.expand_dims(image_array, axis=0)
+            image_tensor = detection_graph.get_tensor_by_name('image_tensor:0')
+            box = detection_graph.get_tensor_by_name('detection_boxes:0')
+            score = detection_graph.get_tensor_by_name('detection_scores:0')
+            clss = detection_graph.get_tensor_by_name('detection_classes:0')
+            num_detections = detection_graph.get_tensor_by_name('num_detections:0')
+
+            (box_list, score_list, _, _) = sess.run(
+                    [box, score, clss, num_detections],
+                    feed_dict={image_tensor: image_array_expanded})
+
+            # draw a bounding box
+            image_draw = PIL.ImageDraw.Draw(image)
+            coords_list = []
+            for box, score in zip(box_list[0], score_list[0]):
+                LOGGER.debug((box, score))
+                if score < threshold_level:
+                    break
+                coords = (
+                    (box[1] * image_array.shape[1],
+                     box[0] * image_array.shape[0]),
+                    (box[3] * image_array.shape[1],
+                     box[2] * image_array.shape[0]))
+                coords_list.append(coords)
+                image_draw.rectangle(coords, outline='RED')
+            del image_draw
+            image.save('%s.png' % os.path.splitext(image_path)[0])
+
+
+def load_model(path_to_model):
+    """Load a TensorFlow model.
+
+    Parameters:
+        path_to_model (str): Path to a tensorflow frozen model.
+
+    Returns:
+        TensorFlow graph.
+
+    """
+    detection_graph = tf.Graph()
+    with detection_graph.as_default():
+        od_graph_def = tf.GraphDef()
+        with tf.gfile.GFile(path_to_model, 'rb') as fid:
+            serialized_graph = fid.read()
+            od_graph_def.ParseFromString(serialized_graph)
+            tf.import_graph_def(od_graph_def, name='')
+
+    return detection_graph
 
 
 def main():
@@ -663,6 +750,14 @@ def main():
         target_path_list=[initalize_token_path],
         ignore_path_list=[DATABASE_PATH],
         task_name='initialize database')
+
+    inference_model_path = os.path.join(
+        WORKSPACE_DIR, os.path.basename(INFERENCE_MODEL_URL))
+    task_graph.add_task(
+        func=ecoshard.download_url,
+        args=(INFERENCE_MODEL_URL, inference_model_path),
+        target_path_list=[inference_model_path],
+        task_name='download TF model')
     task_graph.join()
     ro_database_uri = 'file:%s?mode=ro' % DATABASE_PATH
 
@@ -722,7 +817,7 @@ def main():
 
     inference_worker_thread = threading.Thread(
         target=inference_worker,
-        args=(inference_queue, ro_database_uri))
+        args=(inference_queue, ro_database_uri, inference_model_path))
     inference_worker_thread.start()
 
     APP.run(host='0.0.0.0', port=80)
