@@ -636,8 +636,13 @@ def inference_worker(inference_queue, ro_database_uri, tf_model_path):
                     # a transformed lat/lng bounding box and also save the
                     # image file somewhere and also make an entry in the
                     # database
-                    do_detection(
+                    detection_result = do_detection(
                         tf_graph, THRESHOLD_LEVEL, clipped_raster_path)
+                    if detection_result:
+                        image_bb_path, coord_list = detection_result
+                        LOGGER.debug(
+                            'found dams at %s image %s', coord_list,
+                            image_bb_path)
 
             # TODO: write code here to highlight where a dam was found
             # with GLOBAL_LOCK:
@@ -678,11 +683,7 @@ def do_detection(detection_graph, threshold_level, image_path):
         [base_array[0, :, :],
          base_array[1, :, :],
          base_array[2, :, :]])
-
-    LOGGER.debug(image_array.shape)
-    LOGGER.debug(image_array)
-    image = PIL.Image.fromarray(image_array).convert("RGB")
-
+    LOGGER.debug('detection on %s', image_path)
     with detection_graph.as_default():
         with tf.Session(graph=detection_graph) as sess:
             image_array_expanded = numpy.expand_dims(image_array, axis=0)
@@ -693,25 +694,41 @@ def do_detection(detection_graph, threshold_level, image_path):
             num_detections = detection_graph.get_tensor_by_name('num_detections:0')
 
             (box_list, score_list, _, _) = sess.run(
-                    [box, score, clss, num_detections],
-                    feed_dict={image_tensor: image_array_expanded})
+                [box, score, clss, num_detections],
+                feed_dict={image_tensor: image_array_expanded})
 
-            # draw a bounding box
-            image_draw = PIL.ImageDraw.Draw(image)
-            coords_list = []
-            for box, score in zip(box_list[0], score_list[0]):
-                LOGGER.debug((box, score))
-                if score < threshold_level:
-                    break
-                coords = (
-                    (box[1] * image_array.shape[1],
-                     box[0] * image_array.shape[0]),
-                    (box[3] * image_array.shape[1],
-                     box[2] * image_array.shape[0]))
-                coords_list.append(coords)
-                image_draw.rectangle(coords, outline='RED')
-            del image_draw
-            image.save('%s.png' % os.path.splitext(image_path)[0])
+    # draw a bounding box
+    coords_list = []
+    for box, score in zip(box_list[0], score_list[0]):
+        LOGGER.debug((box, score))
+        if score < threshold_level:
+            break
+        coords = (
+            (box[1] * image_array.shape[1],
+             box[0] * image_array.shape[0]),
+            (box[3] * image_array.shape[1],
+             box[2] * image_array.shape[0]))
+        coords_list.append(coords)
+    if coords_list:
+        lat_lng_list = []
+        image = PIL.Image.fromarray(image_array).convert("RGB")
+        image_draw = PIL.ImageDraw.Draw(image)
+        geotransform = pygeoprocessing.get_raster_info(
+            image_path)['geotransform']
+        for coords in coords_list:
+            image_draw.rectangle(coords, outline='RED')
+            ul_corner = gdal.ApplyGeoTransform(
+                geotransform, coords[0], coords[1])
+            lr_corner = gdal.ApplyGeoTransform(
+                geotransform, coords[2], coords[3])
+            lat_lng_list.append((ul_corner, lr_corner))
+        del image_draw
+        image_path = '%s.png' % os.path.splitext(image_path)[0]
+        image.save(image_path)
+        return image_path, lat_lng_list
+    else:
+        return None
+
 
 
 def load_model(path_to_model):
