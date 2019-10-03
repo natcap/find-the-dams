@@ -13,15 +13,13 @@ RUN apt-get update \
     mercurial \
 && rm -rf /var/lib/apt/lists/*
 
-COPY install-pip-packages.sh .
-
 # build the python environments for 3.6 and 3.7 using conda, pip, and
 # python setup.py install
 SHELL ["/bin/bash", "-c"]
 
-RUN conda create -y --name py35 python=3.5 && conda clean -a -y
-RUN conda run -v -n py35 conda install -c conda-forge gdal=2.4.1 && conda clean -a -y
-RUN conda run -v -n py35 pip install --no-cache-dir \
+RUN conda create -y --name py36 python=3.6
+RUN conda run -v -n py36 conda install -c conda-forge gdal=2.4.2 && conda clean -a -y
+RUN conda run -v -n py36 pip install --no-cache-dir \
     cython \
     ecoshard \
     flask \
@@ -39,12 +37,13 @@ RUN conda run -v -n py35 pip install --no-cache-dir \
     sympy \
     taskgraph && conda clean -a -y
 
-RUN conda init bash && echo "source activate py35" > ~/.bashrc
+RUN conda init bash && echo "source activate py36" > ~/.bashrc
 
 RUN hg clone http://bitbucket.org/natcap/pygeoprocessing /usr/local/pygeoprocessing
 WORKDIR /usr/local/pygeoprocessing
-RUN hg update 1.8.0 && conda run -v -n py35 python setup.py install
+RUN hg update 1.8.0 && conda run -v -n py36 python setup.py install
 WORKDIR /workspace
-RUN curl -O https://storage.googleapis.com/tensorflow/linux/cpu/tensorflow-1.12.0-cp35-cp35m-linux_x86_64.whl && conda run -v -n py35 pip install tensorflow-1.12.0-cp35-cp35m-linux_x86_64.whl && rm tensorflow-1.12.0-cp35-cp35m-linux_x86_64.whl
+COPY tensorflow-1.12.0-cp36-cp36m-linux_x86_64.whl /workspace
+RUN conda run -v -n py36 pip install tensorflow-1.12.0-cp36-cp36m-linux_x86_64.whl && rm tensorflow-1.12.0-cp36-cp36m-linux_x86_64.whl
 
 ENTRYPOINT ["/bin/bash", "-l", "-c"]
