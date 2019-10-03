@@ -233,12 +233,14 @@ def get_bounding_box_quads(
     """Query for mosaic via bounding box and retry if necessary."""
     try:
         mosaic_quad_response = session.get(
-            f'{mosaic_quad_list_url}?bbox={min_x},{min_y},{max_x},{max_y}',
+            '%sbbox=%f,%f,%f,%f' % (
+                mosaic_quad_list_url, min_x, min_y, max_x, max_y),
             timeout=REQUEST_TIMEOUT)
         return mosaic_quad_response
     except Exception:
         LOGGER.exception(
-            f"get_bounding_box_quads {min_x},{min_y},{max_x},{max_y} failed")
+            "get_bounding_box_quads %f, %f, %f, %f, failed" % (
+                min_x, min_y, max_x, max_y))
         raise
 
 
@@ -529,7 +531,7 @@ def download_worker(
                     *reversed(mosaic_item["id"][-4::]))
                 download_raster_path = os.path.join(
                     planet_quads_dir, suffix_subdir,
-                    f'{mosaic_item["id"]}.tif')
+                    '%s.tif' % mosaic_item["id"])
                 download_worker_task_graph.add_task(
                     func=download_url_to_file,
                     args=(download_url, download_raster_path),
@@ -590,7 +592,8 @@ def download_url_to_file(url, target_file_path):
             shutil.copyfileobj(response.raw, target_file)
         del response
     except Exception:
-        LOGGER.exception(f"download of {url} to {target_file_path} failed")
+        LOGGER.exception(
+            "download of %s to %s failed" % (url, target_file_path))
         raise
 
 
@@ -818,13 +821,13 @@ def main():
         WORKSPACE_DIR, 'planet_quads_dir', active_mosaic['id'])
 
     LOGGER.debug(
-        'using this mosaic: '
-        f"""{active_mosaic['last_acquired']} {active_mosaic['interval']} {
-            active_mosaic['grid']['resolution']}""")
+        'using this mosaic: %s %s %s' % (
+            active_mosaic['last_acquired'], active_mosaic['interval'],
+            active_mosaic['grid']['resolution']))
 
     mosaic_quad_list_url = (
-        f"""https://api.planet.com/basemaps/v1/mosaics/"""
-        f"""{active_mosaic['id']}/quads""")
+        "https://api.planet.com/basemaps/v1/mosaics/%s/quads" % (
+            active_mosaic['id']))
 
     download_worker_thread = threading.Thread(
         target=download_worker,
