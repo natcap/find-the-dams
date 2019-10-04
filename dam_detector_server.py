@@ -91,7 +91,7 @@ DAM_BOUNDING_BOX_URL = (
     'dams_database_md5_7acdf64cd03791126a61478e121c4772.db')
 INFERENCE_MODEL_URL = (
     'https://storage.googleapis.com/natcap-natgeo-dam-ecoshards/'
-    'dams_database_md5_7acdf64cd03791126a61478e121c4772.db')
+    'fasterRCNN_08-26-withnotadams_md5_83f58894e34e1e785fcaa2dbc1d3ec7a.pb')
 WORLD_BORDERS_VECTOR_PATH = 'world_borders.gpkg'
 LOGGER = logging.getLogger(__name__)
 
@@ -233,7 +233,7 @@ def get_bounding_box_quads(
     """Query for mosaic via bounding box and retry if necessary."""
     try:
         mosaic_quad_response = session.get(
-            '%sbbox=%f,%f,%f,%f' % (
+            '%s?bbox=%f,%f,%f,%f' % (
                 mosaic_quad_list_url, min_x, min_y, max_x, max_y),
             timeout=REQUEST_TIMEOUT)
         return mosaic_quad_response
@@ -609,6 +609,7 @@ def inference_worker(inference_queue, ro_database_uri, tf_model_path):
 
     """
     try:
+        LOGGER.debug('database uri: %s model path: %s', ro_database_uri, tf_model_path)
         tf_graph = load_model(tf_model_path)
         wgs84_srs = osr.SpatialReference()
         wgs84_srs.ImportFromEPSG(4326)
@@ -722,9 +723,9 @@ def do_detection(detection_graph, threshold_level, image_path):
         for coords in coords_list:
             image_draw.rectangle(coords, outline='RED')
             ul_corner = gdal.ApplyGeoTransform(
-                geotransform, coords[0], coords[1])
+                geotransform, float(coords[0]), float(coords[1]))
             lr_corner = gdal.ApplyGeoTransform(
-                geotransform, coords[2], coords[3])
+                geotransform, float(coords[2]), float(coords[3]))
             lat_lng_list.append((ul_corner, lr_corner))
         del image_draw
         image_path = '%s.png' % os.path.splitext(image_path)[0]
@@ -749,6 +750,7 @@ def load_model(path_to_model):
     with detection_graph.as_default():
         od_graph_def = tf.GraphDef()
         with tf.gfile.GFile(path_to_model, 'rb') as fid:
+            LOGGER.debug('this is the model: %s', path_to_model)
             serialized_graph = fid.read()
             od_graph_def.ParseFromString(serialized_graph)
             tf.import_graph_def(od_graph_def, name='')
