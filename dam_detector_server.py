@@ -67,6 +67,7 @@ import retrying
 import taskgraph
 from osgeo import gdal
 from osgeo import osr
+from osgeo import ogr
 import shapely.prepared
 import shapely.ops
 import shapely.wkb
@@ -645,9 +646,23 @@ def inference_worker(inference_queue, ro_database_uri, tf_model_path):
                         tf_graph, THRESHOLD_LEVEL, clipped_raster_path)
                     if detection_result:
                         image_bb_path, coord_list = detection_result
-                        LOGGER.debug(
-                            'found dams at %s image %s', coord_list,
-                            image_bb_path)
+                        for coord_tuple in coord_list:
+                            source_srs = osr.SpatialReference()
+                            source_srs.ImportFromWkt(raster_info['projection'])
+                            to_wgs84 = osr.CoordinateTransformation(
+                                source_srs, wgs84_srs)
+                            ul_point = ogr.Geometry(ogr.wkbPoint)
+                            LOGGER.debug("*********** coord_tuple: %s", coord_tuple)
+                            ul_point.AddPoint(coord_tuple[0][0], coord_tuple[0][1])
+                            ul_point.Transform(to_wgs84)
+                            lr_point = ogr.Geometry(ogr.wkbPoint)
+                            lr_point.AddPoint(coord_tuple[1][0], coord_tuple[1][1])
+                            lr_point.Transform(to_wgs84)
+                            LOGGER.debug(
+                                'found dams at %s %s image %s',
+                                str((ul_point.GetX(), ul_point.GetY())),
+                                str((lr_point.GetX(), lr_point.GetY())),
+                                image_bb_path)
 
             # TODO: write code here to highlight where a dam was found
             # with GLOBAL_LOCK:
@@ -703,7 +718,7 @@ def do_detection(detection_graph, threshold_level, image_path):
                 feed_dict={image_tensor: image_array_expanded})
 
     # draw a bounding box
-    coords_list = []
+    bb_box_list = []
     for box, score in zip(box_list[0], score_list[0]):
         LOGGER.debug((box, score))
         if score < threshold_level:
@@ -713,19 +728,33 @@ def do_detection(detection_graph, threshold_level, image_path):
              box[0] * image_array.shape[0]),
             (box[3] * image_array.shape[1],
              box[2] * image_array.shape[0]))
-        coords_list.append(coords)
-    if coords_list:
+        local_box = shapely.box(
+            min(coords[1], coords[3]), min(coords[0], coords[2]),
+            max(coords[1], coords[3]), max(coords[0], coords[2]))
+
+        # this joins any overlapping-bounding boxes together
+        local_box_list = []
+        while bb_box_list:
+            box = bb_box_list.pop()
+            if local_box.intersects(box):
+                local_box = local_box.intersection(box)
+            else:
+                local_box_list.append(box)
+        local_box_list.append(box)
+        bb_box_list = local_box_list
+
+    if bb_box_list:
         lat_lng_list = []
         image = PIL.Image.fromarray(image_array).convert("RGB")
         image_draw = PIL.ImageDraw.Draw(image)
         geotransform = pygeoprocessing.get_raster_info(
             image_path)['geotransform']
-        for coords in coords_list:
+        for box in bb_box_list:
             image_draw.rectangle(coords, outline='RED')
             ul_corner = gdal.ApplyGeoTransform(
-                geotransform, float(coords[0]), float(coords[1]))
+                geotransform, float(box.bounds[0]), float(box.bounds[1]))
             lr_corner = gdal.ApplyGeoTransform(
-                geotransform, float(coords[2]), float(coords[3]))
+                geotransform, float(box.bounds[2]), float(box.bounds[3]))
             lat_lng_list.append((ul_corner, lr_corner))
         del image_draw
         image_path = '%s.png' % os.path.splitext(image_path)[0]
