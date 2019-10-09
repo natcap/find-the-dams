@@ -471,6 +471,7 @@ def schedule_worker(download_work_queue, readonly_database_uri):
             break
     except Exception:
         LOGGER.exception('exception in schedule worker')
+    LOGGER.debug("schedule worker is terminating!")
 
 
 def download_worker(
