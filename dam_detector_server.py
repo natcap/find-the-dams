@@ -853,6 +853,7 @@ def main():
         task_name='download TF model')
     task_graph.join()
     ro_database_uri = 'file:%s?mode=ro' % DATABASE_PATH
+    w_database_uri = 'file:%s' % DATABASE_PATH
 
     download_work_queue = queue.Queue(2)
     inference_queue = queue.Queue()
@@ -911,7 +912,7 @@ def main():
     worker_id = 0
     inference_worker_thread = threading.Thread(
         target=inference_worker,
-        args=(inference_queue, ro_database_uri, worker_id,
+        args=(inference_queue, w_database_uri, worker_id,
               inference_model_path))
     inference_worker_thread.start()
 
