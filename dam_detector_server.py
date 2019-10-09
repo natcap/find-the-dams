@@ -601,17 +601,18 @@ def download_url_to_file(url, target_file_path):
         raise
 
 
-def inference_worker(inference_queue, ro_database_uri, tf_model_path):
+def inference_worker(inference_queue, database_uri, worker_id, tf_model_path):
     """Take large tiles and search for dams.
 
     Parameters:
         inference_queue (queue): will get ('fragment_id', 'tile_path') tuples
             where 'tile_path' is a path to a geotiff that can be searched
             for dam bounding boxes.
-        ro_database_uri (str): URI to read-only version of database that's
-            used to search for pre-known dams.
+        database_uri (str): URI to writeable version of database to store
+            found dams.
 
     """
+    tf_dam_count = 0
     try:
         LOGGER.debug('database uri: %s model path: %s', ro_database_uri, tf_model_path)
         tf_graph = load_model(tf_model_path)
@@ -648,6 +649,7 @@ def inference_worker(inference_queue, ro_database_uri, tf_model_path):
                     detection_result = do_detection(
                         tf_graph, THRESHOLD_LEVEL, clipped_raster_path)
                     if detection_result:
+                        dam_list = []
                         image_bb_path, coord_list = detection_result
                         for coord_tuple in coord_list:
                             source_srs = osr.SpatialReference()
@@ -666,19 +668,33 @@ def inference_worker(inference_queue, ro_database_uri, tf_model_path):
                                 str((ul_point.GetX(), ul_point.GetY())),
                                 str((lr_point.GetX(), lr_point.GetY())),
                                 image_bb_path)
+                            dam_list.append((
+                                'tensorflow_%d_%d' % (worker_id, tf_dam_count),
+                                0, 'TensorFlow identified dam',
+                                lr_point.GetY(), lr_point.GetX(),
+                                ul_point.GetY(), ul_point.GetX()))
+                            tf_dam_count += 1
 
-            # TODO: write code here to highlight where a dam was found
-            # with GLOBAL_LOCK:
-            #     for (dam_id, lat_min, lng_min, lat_max, lng_max) in (
-            #             cursor.fetchall()):
-            #         fragment_dam_id = '%s_%s' % (fragment_id, dam_id)
-            #         IDENTIFIED_DAMS[fragment_dam_id] = {
-            #             'color': STATE_TO_COLOR['complete'],
-            #             'bounds': [
-            #                 [lat_min, lng_min],
-            #                 [lat_max, lng_max]],
-            #         }
-            #         LOGGER.debug("FOUND A DAM AT %s", raster_wgs84_bb)
+                        if dam_list:
+                            with GLOBAL_LOCK:
+                                connection = sqlite3.connect(database_uri)
+                                cursor = connection.cursor()
+                                cursor.executemany(
+                                    'INSERT INTO identified_dams( '
+                                    'dam_id, pre_known, dam_description, lat_min, lng_min, lat_max, '
+                                    'lng_max) VALUES(?, ?, ?, ?, ?, ?, ?)', dam_list)
+                                cursor.close()
+                                connection.commit()
+
+                            for (dam_id, _, _, lat_min,
+                                    lng_min, lat_max, lng_max) in (dam_list):
+                                fragment_dam_id = '%s_%s' % (fragment_id, dam_id)
+                                IDENTIFIED_DAMS[fragment_dam_id] = {
+                                    'color': STATE_TO_COLOR['complete'],
+                                    'bounds': [
+                                        [lat_min, lng_min],
+                                        [lat_max, lng_max]],
+                                }
 
             with GLOBAL_LOCK:
                 FRAGMENT_ID_STATUS_MAP[fragment_id]['color'] = (
