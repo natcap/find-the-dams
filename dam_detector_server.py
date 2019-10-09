@@ -797,12 +797,12 @@ def do_detection(detection_graph, threshold_level, image_path,
             lat_lng_list.append((ul_corner, lr_corner))
         del image_draw
         image_path = os.path.join(
-            dam_image_workspace, '%s.png' % os.path.splitext(image_path)[0])
+            dam_image_workspace, '%s.png' % os.path.basename(
+                os.path.splitext(image_path)[0]))
         image.save(image_path)
         return image_path, lat_lng_list
     else:
         return None
-
 
 
 def load_model(path_to_model):
