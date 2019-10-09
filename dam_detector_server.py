@@ -751,7 +751,7 @@ def do_detection(detection_graph, threshold_level, image_path):
             else:
                 tmp_box_list.append(test_box)
         local_box_list = tmp_box_list
-        box_list.append(local_box)
+        bb_box_list.append(local_box)
 
     if bb_box_list:
         LOGGER.debug('******** found a bounding box')
