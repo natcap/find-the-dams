@@ -718,7 +718,7 @@ def do_detection(detection_graph, threshold_level, image_path):
                 feed_dict={image_tensor: image_array_expanded})
 
     # draw a bounding box
-    bb_box_list = []
+    local_box_list = []
     for box, score in zip(box_list[0], score_list[0]):
         LOGGER.debug((box, score))
         if score < threshold_level:
@@ -732,16 +732,24 @@ def do_detection(detection_graph, threshold_level, image_path):
             min(coords[1], coords[3]), min(coords[0], coords[2]),
             max(coords[1], coords[3]), max(coords[0], coords[2]))
 
-        # this joins any overlapping-bounding boxes together
-        local_box_list = []
-        while bb_box_list:
-            box = bb_box_list.pop()
-            if local_box.intersects(box):
-                local_box = local_box.intersection(box)
+        local_box_list.append(local_box)
+
+    # this joins any overlapping-bounding boxes together
+    bb_box_list = []
+    while local_box_list:
+        local_box = local_box_list.pop()
+        tmp_box_list = []
+        n_intersections = 0
+        while local_box_list:
+            test_box = local_box_list.pop()
+            if local_box.intersects(test_box):
+                local_box = local_box.intersection(test_box)
+                n_intersections += 1
             else:
-                local_box_list.append(box)
-        local_box_list.append(box)
-        bb_box_list = local_box_list
+                tmp_box_list.append(test_box)
+        local_box_list = tmp_box_list
+        if n_intersections > 0:
+            box_list.append(local_box)
 
     if bb_box_list:
         lat_lng_list = []
