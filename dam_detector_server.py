@@ -732,8 +732,8 @@ def do_detection(detection_graph, threshold_level, image_path):
             (box[3] * image_array.shape[1],
              box[2] * image_array.shape[0]))
         local_box = shapely.geometry.box(
-            min(coords[1], coords[3]), min(coords[0], coords[2]),
-            max(coords[1], coords[3]), max(coords[0], coords[2]))
+            min(coords[0][0], coords[1][0]), min(coords[0][1], coords[1][1]),
+            max(coords[0][0], coords[1][0]), max(coords[0][1], coords[1][1]))
 
         local_box_list.append(local_box)
 
