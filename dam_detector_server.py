@@ -602,14 +602,14 @@ def download_url_to_file(url, target_file_path):
         raise
 
 
-def inference_worker(inference_queue, database_uri, worker_id, tf_model_path):
+def inference_worker(inference_queue, database_path, worker_id, tf_model_path):
     """Take large tiles and search for dams.
 
     Parameters:
         inference_queue (queue): will get ('fragment_id', 'tile_path') tuples
             where 'tile_path' is a path to a geotiff that can be searched
             for dam bounding boxes.
-        database_uri (str): URI to writeable version of database to store
+        database_path (str): URI to writeable version of database to store
             found dams.
 
     """
@@ -686,7 +686,7 @@ def inference_worker(inference_queue, database_uri, worker_id, tf_model_path):
 
                         if dam_list:
                             with GLOBAL_LOCK:
-                                connection = sqlite3.connect(database_uri)
+                                connection = sqlite3.connect(database_path)
                                 cursor = connection.cursor()
                                 cursor.executemany(
                                     'INSERT INTO identified_dams( '
@@ -853,7 +853,7 @@ def main():
         task_name='download TF model')
     task_graph.join()
     ro_database_uri = 'file:%s?mode=ro' % DATABASE_PATH
-    w_database_uri = 'file:%s' % DATABASE_PATH
+    database_path = DATABASE_PATH
 
     download_work_queue = queue.Queue(2)
     inference_queue = queue.Queue()
@@ -912,7 +912,7 @@ def main():
     worker_id = 0
     inference_worker_thread = threading.Thread(
         target=inference_worker,
-        args=(inference_queue, w_database_uri, worker_id,
+        args=(inference_queue, database_path, worker_id,
               inference_model_path))
     inference_worker_thread.start()
 
