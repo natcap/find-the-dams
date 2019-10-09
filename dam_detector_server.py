@@ -622,7 +622,7 @@ def inference_worker(inference_queue, database_uri, worker_id, tf_model_path):
             fragment_id, tile_path = inference_queue.get()
 
             fragment_workspace = os.path.join(
-                WORKSPACE_DIR, '%d_%d' % (worker_id, fragment_id))
+                WORKSPACE_DIR, '%s_%s' % (worker_id, fragment_id))
             try:
                 os.makedirs(fragment_workspace)
             except OSError:
