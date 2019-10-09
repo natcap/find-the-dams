@@ -98,6 +98,7 @@ WORLD_BORDERS_VECTOR_PATH = 'world_borders.gpkg'
 LOGGER = logging.getLogger(__name__)
 
 WORKSPACE_DIR = 'workspace'
+DAM_IMAGE_WORKSPACE = os.path.join(WORKSPACE_DIR, 'identified_dam_imagery')
 DATABASE_PATH = os.path.join(WORKSPACE_DIR, 'find-the-dams.db')
 PLANET_API_KEY_FILE = 'planet_api_key.txt'
 ACTIVE_MOSAIC_JSON_PATH = os.path.join(WORKSPACE_DIR, 'active_mosaic.json')
@@ -614,12 +615,19 @@ def inference_worker(inference_queue, database_uri, worker_id, tf_model_path):
     """
     tf_dam_count = 0
     try:
-        LOGGER.debug('database uri: %s model path: %s', ro_database_uri, tf_model_path)
         tf_graph = load_model(tf_model_path)
         wgs84_srs = osr.SpatialReference()
         wgs84_srs.ImportFromEPSG(4326)
         while True:
             fragment_id, tile_path = inference_queue.get()
+
+            fragment_workspace = os.path.join(
+                WORKSPACE_DIR, '%d_%d' % (worker_id, fragment_id))
+            try:
+                os.makedirs(fragment_workspace)
+            except OSError:
+                pass
+
             LOGGER.debug('doing inference on %s', tile_path)
             LOGGER.debug('search for dam bounding boxes in this region')
 
@@ -636,7 +644,7 @@ def inference_worker(inference_queue, database_uri, worker_id, tf_model_path):
                     ymin, ymax = sorted([ul_corner[1], lr_corner[1]])
 
                     clipped_raster_path = os.path.join(
-                        WORKSPACE_DIR, '%d_%d.tif' % (i_off, j_off))
+                        fragment_workspace, '%d_%d.tif' % (i_off, j_off))
                     LOGGER.debug("clip to %s", [xmin, ymin, xmax, ymax])
                     pygeoprocessing.warp_raster(
                         tile_path, raster_info['pixel_size'],
@@ -647,7 +655,8 @@ def inference_worker(inference_queue, database_uri, worker_id, tf_model_path):
                     # image file somewhere and also make an entry in the
                     # database
                     detection_result = do_detection(
-                        tf_graph, THRESHOLD_LEVEL, clipped_raster_path)
+                        tf_graph, THRESHOLD_LEVEL, clipped_raster_path,
+                        DAM_IMAGE_WORKSPACE)
                     if detection_result:
                         dam_list = []
                         image_bb_path, coord_list = detection_result
@@ -695,7 +704,8 @@ def inference_worker(inference_queue, database_uri, worker_id, tf_model_path):
                                         [lat_min, lng_min],
                                         [lat_max, lng_max]],
                                 }
-
+            LOGGER.debug('removing workspace %s', fragment_workspace)
+            shutil.rmtree(fragment_workspace)
             with GLOBAL_LOCK:
                 FRAGMENT_ID_STATUS_MAP[fragment_id]['color'] = (
                     STATE_TO_COLOR['analyzing'])
@@ -703,7 +713,8 @@ def inference_worker(inference_queue, database_uri, worker_id, tf_model_path):
         LOGGER.exception("Exception in inference_worker")
 
 
-def do_detection(detection_graph, threshold_level, image_path):
+def do_detection(detection_graph, threshold_level, image_path,
+                 dam_image_workspace):
     """Detect whatever the graph is supposed to detect on a single image.
 
     Parameters:
@@ -712,6 +723,7 @@ def do_detection(detection_graph, threshold_level, image_path):
         threshold_level (float): the confidence threshold level to cut off
             classification
         image_path (str): path to an image that `detection_graph` can parse.
+        dam_image_workspace (str): path to a directory that can save images.
 
     Returns:
         None.
@@ -784,7 +796,8 @@ def do_detection(detection_graph, threshold_level, image_path):
                 geotransform, float(box.bounds[2]), float(box.bounds[3]))
             lat_lng_list.append((ul_corner, lr_corner))
         del image_draw
-        image_path = '%s.png' % os.path.splitext(image_path)[0]
+        image_path = os.path.join(
+            dam_image_workspace, '%s.png' % os.path.splitext(image_path)[0])
         image.save(image_path)
         return image_path, lat_lng_list
     else:
@@ -816,10 +829,11 @@ def load_model(path_to_model):
 
 def main():
     """Entry point."""
-    try:
-        os.makedirs(WORKSPACE_DIR)
-    except OSError:
-        pass
+    for dirname in [WORKSPACE_DIR, DAM_IMAGE_WORKSPACE]:
+        try:
+            os.makedirs(dirname)
+        except OSError:
+            pass
     initalize_token_path = os.path.join(
         WORKSPACE_DIR, 'initalize_spatial_search_units.COMPLETE')
     task_graph = taskgraph.TaskGraph(WORKSPACE_DIR, -1, 5.0)
@@ -894,9 +908,11 @@ def main():
             planet_api_key, mosaic_quad_list_url, planet_quads_dir))
     download_worker_thread.start()
 
+    worker_id = 0
     inference_worker_thread = threading.Thread(
         target=inference_worker,
-        args=(inference_queue, ro_database_uri, inference_model_path))
+        args=(inference_queue, ro_database_uri, worker_id,
+              inference_model_path))
     inference_worker_thread.start()
 
     APP.run(host='0.0.0.0', port=80)
