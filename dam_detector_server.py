@@ -68,10 +68,11 @@ import taskgraph
 from osgeo import gdal
 from osgeo import osr
 from osgeo import ogr
-import shapely.prepared
+import shapely.geometry
 import shapely.ops
-import shapely.wkb
+import shapely.prepared
 import shapely.strtree
+import shapely.wkb
 from flask import Flask
 import flask
 import tensorflow as tf
@@ -730,7 +731,7 @@ def do_detection(detection_graph, threshold_level, image_path):
              box[0] * image_array.shape[0]),
             (box[3] * image_array.shape[1],
              box[2] * image_array.shape[0]))
-        local_box = shapely.box(
+        local_box = shapely.geometry.box(
             min(coords[1], coords[3]), min(coords[0], coords[2]),
             max(coords[1], coords[3]), max(coords[0], coords[2]))
 
