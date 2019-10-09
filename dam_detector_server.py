@@ -467,6 +467,7 @@ def schedule_worker(download_work_queue, readonly_database_uri):
                 WORKING_GRID_ID_STATUS_MAP[grid_id] = 'scheduled'
             cursor.close()
             connection.commit()
+            # this will only do the first grid
             break
     except Exception:
         LOGGER.exception('exception in schedule worker')
