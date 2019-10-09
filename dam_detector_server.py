@@ -284,7 +284,7 @@ def initalize_spatial_search_units(database_path, complete_token_path):
         ON grid_status (grid_id);
 
         CREATE TABLE identified_dams (
-            dam_id INTEGER NOT NULL PRIMARY KEY,
+            dam_id TEXT NOT NULL,
             pre_known INTEGER NOT NULL,
             dam_description TEXT NOT NULL,
             lat_min REAL NOT NULL,
@@ -678,8 +678,9 @@ def inference_worker(inference_queue, database_path, worker_id, tf_model_path):
                                 str((lr_point.GetX(), lr_point.GetY())),
                                 image_bb_path)
                             dam_list.append((
-                                'tensorflow_%d_%d' % (worker_id, tf_dam_count),
-                                0, 'TensorFlow identified dam',
+                                'tensorflow_%d_%d',
+                                0, 'TensorFlow identified dam %d_%d' % (
+                                    worker_id, tf_dam_count),
                                 lr_point.GetY(), lr_point.GetX(),
                                 ul_point.GetY(), ul_point.GetX()))
                             tf_dam_count += 1
@@ -690,8 +691,10 @@ def inference_worker(inference_queue, database_path, worker_id, tf_model_path):
                                 cursor = connection.cursor()
                                 cursor.executemany(
                                     'INSERT INTO identified_dams( '
-                                    'dam_id, pre_known, dam_description, lat_min, lng_min, lat_max, '
-                                    'lng_max) VALUES(?, ?, ?, ?, ?, ?, ?)', dam_list)
+                                    'dam_id, pre_known, dam_description, '
+                                    'lat_min, lng_min, lat_max, '
+                                    'lng_max) VALUES(?, ?, ?, ?, ?, ?, ?)',
+                                    dam_list)
                                 cursor.close()
                                 connection.commit()
 
