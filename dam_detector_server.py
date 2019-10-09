@@ -300,7 +300,7 @@ def initalize_spatial_search_units(database_path, complete_token_path):
         ON identified_dams (lat_max);
         CREATE INDEX id_lng_max_idx
         ON identified_dams (lng_max);
-        CREATE UNIQUE INDEX id_dam_id_idx
+        CREATE INDEX id_dam_id_idx
         ON identified_dams (dam_id);
         """)
     global DATABASE_STATUS_STR
