@@ -802,7 +802,9 @@ def do_detection(detection_graph, threshold_level, image_path,
         image_path = os.path.join(
             dam_image_workspace, '%s.png' % os.path.basename(
                 os.path.splitext(image_path)[0]))
+        LOGGER.debug('going to save %s', image_path)
         image.save(image_path)
+        LOGGER.debug('saved %s', image_path)
         return image_path, lat_lng_list
     else:
         return None
