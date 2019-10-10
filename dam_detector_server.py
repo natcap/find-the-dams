@@ -656,7 +656,8 @@ def inference_worker(inference_queue, database_path, worker_id, tf_model_path):
                     # database
                     detection_result = do_detection(
                         tf_graph, THRESHOLD_LEVEL, clipped_raster_path,
-                        DAM_IMAGE_WORKSPACE)
+                        DAM_IMAGE_WORKSPACE, '%s_%s' % (
+                            worker_id, fragment_id))
                     if detection_result:
                         dam_list = []
                         image_bb_path, coord_list = detection_result
@@ -717,7 +718,7 @@ def inference_worker(inference_queue, database_path, worker_id, tf_model_path):
 
 
 def do_detection(detection_graph, threshold_level, image_path,
-                 dam_image_workspace):
+                 dam_image_workspace, grid_tag):
     """Detect whatever the graph is supposed to detect on a single image.
 
     Parameters:
@@ -727,6 +728,7 @@ def do_detection(detection_graph, threshold_level, image_path,
             classification
         image_path (str): path to an image that `detection_graph` can parse.
         dam_image_workspace (str): path to a directory that can save images.
+        grid_tag (str): tag to attach to image file names
 
     Returns:
         None.
@@ -799,13 +801,13 @@ def do_detection(detection_graph, threshold_level, image_path,
                 geotransform, float(box.bounds[2]), float(box.bounds[3]))
             lat_lng_list.append((ul_corner, lr_corner))
         del image_draw
-        image_path = os.path.join(
-            dam_image_workspace, '%s.png' % os.path.basename(
-                os.path.splitext(image_path)[0]))
-        LOGGER.debug('going to save %s', image_path)
-        image.save(image_path)
-        LOGGER.debug('saved %s', image_path)
-        return image_path, lat_lng_list
+        png_image_path = os.path.join(
+            dam_image_workspace, '%s_%s.png' % (grid_tag, os.path.basename(
+                os.path.splitext(image_path)[0])))
+        LOGGER.debug('going to save %s', png_image_path)
+        image.save(png_image_path)
+        LOGGER.debug('saved %s', png_image_path)
+        return png_image_path, lat_lng_list
     else:
         return None
 
