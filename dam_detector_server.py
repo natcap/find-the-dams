@@ -787,7 +787,9 @@ def do_detection(detection_graph, threshold_level, image_path,
         if ((box[1] < .1 and box[3] < .1) or
                 (box[0] < .1 and box[2] < .1) or
                 (box[1] > .9 and box[3] > .9) or
-                (box[0] > .9 and box[2] > .9)):
+                (box[0] > .9 and box[2] > .9) or
+                (abs(box[0] - box[2]) >= .9) or
+                (abs(box[1] - box[3]) >= .9)):
             # this is an edge box -- probably not a dam and is an artifact of
             # fasterRCNN_08-26-withnotadams_md5_83f58894e34e1e785fcaa2dbc1d3ec7a.pb
             continue
