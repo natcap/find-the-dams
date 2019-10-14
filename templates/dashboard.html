@@ -129,7 +129,7 @@
                                 {
                                     color: state['color'],
                                     weight: 1,
-                                    fill: bool(state['fill']),
+                                    fill: state['fill'] == 'true',
                                     fillOpacity: 0.6,
                                 }).addTo(
                                     processing_layer);
