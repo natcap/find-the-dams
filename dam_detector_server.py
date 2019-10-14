@@ -110,7 +110,7 @@ PLANET_API_KEY_FILE = 'planet_api_key.txt'
 ACTIVE_MOSAIC_JSON_PATH = os.path.join(WORKSPACE_DIR, 'active_mosaic.json')
 REQUEST_TIMEOUT = 5
 DICE_SIZE = (419, 419)  # how to dice global quads.
-THRESHOLD_LEVEL = 0.04
+THRESHOLD_LEVEL = 0.07
 DATABASE_STATUS_STR = None
 GLOBAL_LOCK = None
 WORKING_GRID_ID_STATUS_MAP = None
@@ -820,8 +820,8 @@ def do_detection(detection_graph, threshold_level, image_path,
         local_box_list = tmp_box_list
 
         # make sure we intersect at least one thing
-        if n_intersections < 1:
-            continue
+        # if n_intersections < 1:
+        #     continue
         bb_box_list.append(local_box)
 
     if bb_box_list:
