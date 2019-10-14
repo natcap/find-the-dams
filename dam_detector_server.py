@@ -1,6 +1,12 @@
 # coding=UTF-8
 """This server will pull unclassified tiles and attempt to find dams in them.
 
+Launch like this:
+
+sudo docker build docker-image/ -t therealspring/dam-detection:0.0.1
+
+hg pull && hg up && sudo docker run -it --rm -p 80:80 -v `pwd`:/workspace therealspring/dam-detection:0.0.1 "nohup python dam_detector_server.py"
+
 There are x steps:
 0) check to see if anything was interrupted on the last run
     * fill this in.
@@ -109,7 +115,7 @@ DATABASE_STATUS_STR = None
 GLOBAL_LOCK = None
 WORKING_GRID_ID_STATUS_MAP = None
 FRAGMENT_ID_STATUS_MAP = None
-IDENTIFIED_DAMS = None
+IDENTIFIED_DAM_MAP = None
 SESSION_UUID = None
 STATE_TO_COLOR = {
     'unscheduled': '#333333',
@@ -117,6 +123,11 @@ STATE_TO_COLOR = {
     'downloaded': '#FF6600',
     'analyzing': '#6666FF',
     'complete': '#00FF33',
+}
+
+DAM_STATE_COLOR = {
+    'identified': '#3300FF',
+    'pre_known': '#808080',
 }
 
 NEXT_STATE = {
@@ -191,7 +202,7 @@ def processing_status():
             for grid_id, fragment_info in FRAGMENT_ID_STATUS_MAP.items():
                 polygons_to_update[grid_id] = fragment_info
 
-            for dam_id, dam_info in IDENTIFIED_DAMS.items():
+            for dam_id, dam_info in IDENTIFIED_DAM_MAP.items():
                 LOGGER.debug(dam_info)
                 polygons_to_update[dam_id] = dam_info
             for grid_id, status in WORKING_GRID_ID_STATUS_MAP.items():
@@ -355,6 +366,13 @@ def initalize_spatial_search_units(database_path, complete_token_path):
             spatial_analysis_unit_list.append(
                 (key, 1, '%s:%s' % (database_id, description), lat_min,
                  lng_min, lat_max, lng_max))
+
+            IDENTIFIED_DAM_MAP[key] = {
+                'color': DAM_STATE_COLOR['pre_known'],
+                'bounds': [
+                    [lat_min, lng_min],
+                    [lat_max, lng_max]],
+            }
     except Exception:
         LOGGER.exception("Exception encountered.")
     finally:
@@ -560,7 +578,8 @@ def download_worker(
                         'bounds':
                             [[raster_wgs84_bb[1], raster_wgs84_bb[0]],
                              [raster_wgs84_bb[3], raster_wgs84_bb[2]]],
-                        'color': STATE_TO_COLOR['downloaded']
+                        'color': STATE_TO_COLOR['downloaded'],
+                        'fill': False,
                     }
 
                 LOGGER.debug('downloaded %s', download_url)
@@ -679,7 +698,7 @@ def inference_worker(inference_queue, database_path, worker_id, tf_model_path):
                                 str((lr_point.GetX(), lr_point.GetY())),
                                 image_bb_path)
                             dam_list.append((
-                                'tensorflow_%d_%d',
+                                'tf_%d_%d' % (worker_id, tf_dam_count),
                                 0, 'TensorFlow identified dam %d_%d' % (
                                     worker_id, tf_dam_count),
                                 lr_point.GetY(), lr_point.GetX(),
@@ -702,8 +721,8 @@ def inference_worker(inference_queue, database_path, worker_id, tf_model_path):
                             for (dam_id, _, _, lat_min,
                                     lng_min, lat_max, lng_max) in (dam_list):
                                 fragment_dam_id = '%s_%s' % (fragment_id, dam_id)
-                                IDENTIFIED_DAMS[fragment_dam_id] = {
-                                    'color': STATE_TO_COLOR['complete'],
+                                IDENTIFIED_DAM_MAP[fragment_dam_id] = {
+                                    'color': DAM_STATE_COLOR['identified'],
                                     'bounds': [
                                         [lat_min, lng_min],
                                         [lat_max, lng_max]],
@@ -961,6 +980,6 @@ if __name__ == '__main__':
     GLOBAL_LOCK = threading.Lock()
     WORKING_GRID_ID_STATUS_MAP = {}
     FRAGMENT_ID_STATUS_MAP = {}
-    IDENTIFIED_DAMS = {}
+    IDENTIFIED_DAM_MAP = {}
     SESSION_UUID = uuid.uuid4().hex
     main()
