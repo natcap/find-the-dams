@@ -116,6 +116,7 @@ GLOBAL_LOCK = None
 WORKING_GRID_ID_STATUS_MAP = None
 FRAGMENT_ID_STATUS_MAP = None
 IDENTIFIED_DAM_MAP = None
+KNOWN_DAM_MAP = None
 SESSION_UUID = None
 STATE_TO_COLOR = {
     'unscheduled': '#333333',
@@ -336,6 +337,8 @@ def initalize_spatial_search_units(database_path, complete_token_path):
         os.rename(dam_bounding_box_bb_tmp_path, dam_bounding_box_bb_path)
     DATABASE_STATUS_STR = "parse dam bounding box database for valid dams"
     LOGGER.debug(DATABASE_STATUS_STR)
+    global KNOWN_DAM_MAP
+    KNOWN_DAM_MAP = {}
     try:
         connection = sqlite3.connect(dam_bounding_box_bb_path)
         cursor = connection.cursor()
@@ -367,7 +370,7 @@ def initalize_spatial_search_units(database_path, complete_token_path):
                 (key, 1, '%s:%s' % (database_id, description), lat_min,
                  lng_min, lat_max, lng_max))
 
-            IDENTIFIED_DAM_MAP[key] = {
+            KNOWN_DAM_MAP[key] = {
                 'color': DAM_STATE_COLOR['pre_known'],
                 'bounds': [
                     [lat_min, lng_min],
@@ -495,12 +498,12 @@ def schedule_worker(download_work_queue, readonly_database_uri):
 
 
 def download_worker(
-        download_queue, inference_queue, database_uri, planet_api_key,
+        download_work_queue, inference_queue, database_uri, planet_api_key,
         mosaic_quad_list_url, planet_quads_dir):
     """Fetch Planet tiles as requested.
 
     Parameters:
-        download_queue (queue): this function will pull from this queue and
+        download_work_queue (queue): this function will pull from this queue and
             expect grid ids whose location can be found in the database at
             `database_uri`.
         inference_queue (queue): Planet tiles that need the data inference
@@ -531,7 +534,7 @@ def download_worker(
         wgs84_srs = None
 
         while True:
-            grid_id = download_queue.get()
+            grid_id = download_work_queue.get()
             LOGGER.debug('about to fetch grid_id %s', grid_id)
             connection = sqlite3.connect(database_uri, uri=True)
             cursor = connection.cursor()
@@ -586,8 +589,6 @@ def download_worker(
                 inference_queue.put((fragment_id, download_raster_path))
             LOGGER.debug(
                 '# TODO: update the status to indicate grid is downloaded')
-            with GLOBAL_LOCK:
-                WORKING_GRID_ID_STATUS_MAP[grid_id] = 'downloaded'
             cursor.close()
             connection.commit()
     except Exception:
@@ -640,15 +641,18 @@ def inference_worker(inference_queue, database_path, worker_id, tf_model_path):
         while True:
             fragment_id, tile_path = inference_queue.get()
 
-            fragment_workspace = os.path.join(
+            quad_workspace = os.path.join(
                 WORKSPACE_DIR, '%s_%s' % (worker_id, fragment_id))
             try:
-                os.makedirs(fragment_workspace)
+                os.makedirs(quad_workspace)
             except OSError:
                 pass
 
             LOGGER.debug('doing inference on %s', tile_path)
             LOGGER.debug('search for dam bounding boxes in this region')
+            with GLOBAL_LOCK:
+                FRAGMENT_ID_STATUS_MAP[fragment_id]['color'] = (
+                    STATE_TO_COLOR['analyzing'])
 
             raster_info = pygeoprocessing.get_raster_info(tile_path)
             x_size, y_size = raster_info['raster_size']
@@ -663,7 +667,7 @@ def inference_worker(inference_queue, database_path, worker_id, tf_model_path):
                     ymin, ymax = sorted([ul_corner[1], lr_corner[1]])
 
                     clipped_raster_path = os.path.join(
-                        fragment_workspace, '%d_%d.tif' % (i_off, j_off))
+                        quad_workspace, '%d_%d.tif' % (i_off, j_off))
                     LOGGER.debug("clip to %s", [xmin, ymin, xmax, ymax])
                     pygeoprocessing.warp_raster(
                         tile_path, raster_info['pixel_size'],
@@ -727,11 +731,11 @@ def inference_worker(inference_queue, database_path, worker_id, tf_model_path):
                                         [lat_min, lng_min],
                                         [lat_max, lng_max]],
                                 }
-            LOGGER.debug('removing workspace %s', fragment_workspace)
-            shutil.rmtree(fragment_workspace)
+            LOGGER.debug('removing workspace %s', quad_workspace)
+            shutil.rmtree(quad_workspace)
             with GLOBAL_LOCK:
                 FRAGMENT_ID_STATUS_MAP[fragment_id]['color'] = (
-                    STATE_TO_COLOR['analyzing'])
+                    STATE_TO_COLOR['complete'])
     except Exception:
         LOGGER.exception("Exception in inference_worker")
 
@@ -774,8 +778,8 @@ def do_detection(detection_graph, threshold_level, image_path,
 
     # draw a bounding box
     local_box_list = []
-    for box, score in zip(box_list[0], score_list[0]):
-        LOGGER.debug((box, score))
+    for box, score in reversed(sorted(
+            zip(box_list[0], score_list[0]), key=lambda x: x[1])):
         if score < threshold_level:
             break
         coords = (
@@ -784,12 +788,14 @@ def do_detection(detection_graph, threshold_level, image_path,
             (box[3] * image_array.shape[1],
              box[2] * image_array.shape[0]))
         local_box = shapely.geometry.box(
-            min(coords[0][0], coords[1][0]), min(coords[0][1], coords[1][1]),
-            max(coords[0][0], coords[1][0]), max(coords[0][1], coords[1][1]))
-
+            min(coords[0][0], coords[1][0]),
+            min(coords[0][1], coords[1][1]),
+            max(coords[0][0], coords[1][0]),
+            max(coords[0][1], coords[1][1]))
         local_box_list.append(local_box)
+    LOGGER.debug('found %d bounding boxes', len(local_box_list))
 
-    # this joins any overlapping-bounding boxes together
+    # this unions any overlapping-bounding boxes together
     bb_box_list = []
     while local_box_list:
         local_box = local_box_list.pop()
@@ -798,7 +804,7 @@ def do_detection(detection_graph, threshold_level, image_path,
         while local_box_list:
             test_box = local_box_list.pop()
             if local_box.intersects(test_box):
-                local_box = local_box.intersection(test_box)
+                local_box = local_box.union(test_box)
                 n_intersections += 1
             else:
                 tmp_box_list.append(test_box)
@@ -945,35 +951,6 @@ def main():
     APP.run(host='0.0.0.0', port=80)
     task_graph.close()
     schedule_worker_thread.join()
-
-
-def create_app(test_config=None):
-    # create and configure the app
-    app = Flask(__name__, instance_relative_config=True)
-    app.config.from_mapping(
-        SECRET_KEY='dev',
-        DATABASE=os.path.join(app.instance_path, 'flaskr.sqlite'),
-    )
-
-    if test_config is None:
-        # load the instance config, if it exists, when not testing
-        app.config.from_pyfile('config.py', silent=True)
-    else:
-        # load the test config if passed in
-        app.config.from_mapping(test_config)
-
-    # ensure the instance folder exists
-    try:
-        os.makedirs(app.instance_path)
-    except OSError:
-        pass
-
-    # a simple page that says hello
-    @app.route('/hello')
-    def hello():
-        return 'Hello, World!'
-
-    return app
 
 
 if __name__ == '__main__':
