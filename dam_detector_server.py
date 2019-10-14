@@ -582,7 +582,7 @@ def download_worker(
                             [[raster_wgs84_bb[1], raster_wgs84_bb[0]],
                              [raster_wgs84_bb[3], raster_wgs84_bb[2]]],
                         'color': STATE_TO_COLOR['downloaded'],
-                        'fill': False,
+                        'fill': 'false',
                     }
 
                 LOGGER.debug('downloaded %s', download_url)
