@@ -243,20 +243,51 @@ def processing_status():
         return str(e)
 
 
-@retrying.retry(wait_exponential_multiplier=1000, wait_exponential_max=10000)
 def get_bounding_box_quads(
         session, mosaic_quad_list_url, min_x, min_y, max_x, max_y):
-    """Query for mosaic via bounding box and retry if necessary."""
+    """Query for mosaic via bounding box and retry if necessary.
+
+    Parameters:
+        session (requests.Session): an object that is pre-authenticated to
+            download given url.
+        mosaic_quad_list_url (str): base url to fetch Planet bounding box.
+        min_x, min_y, max_x, max_y (float): bounding box coordinates in
+            lat/lng.
+
+    Returns:
+        list of planet items as described in the API
+        https://developers.planet.com/docs/api/reference/#operation/getQuadDownloadLinks
+
+    """
     try:
-        mosaic_quad_response = session.get(
-            '%s?bbox=%f,%f,%f,%f' % (
-                mosaic_quad_list_url, min_x, min_y, max_x, max_y),
-            timeout=REQUEST_TIMEOUT)
+        items_list = []
+        mosaic_quad_response = guarded_session_get(
+            session, '%s?bbox=%f,%f,%f,%f' % (
+                mosaic_quad_list_url, min_x, min_y, max_x, max_y))
+
+        while True:
+            mosaic_quad_dict = mosaic_quad_response.json()
+            items_list.extend(mosaic_quad_dict['items'])
+            if '_next' in mosaic_quad_dict['_links']:
+                mosaic_quad_response = guarded_session_get(
+                    session, mosaic_quad_dict['_links']['_next'])
+            else:
+                break
         return mosaic_quad_response
     except Exception:
         LOGGER.exception(
             "get_bounding_box_quads %f, %f, %f, %f, failed" % (
                 min_x, min_y, max_x, max_y))
+        raise
+
+
+@retrying.retry(wait_exponential_multiplier=1000, wait_exponential_max=10000)
+def guarded_session_get(session, url):
+    """Get url from session and retry if failure."""
+    try:
+        return session.get(url, timeout=REQUEST_TIMEOUT)
+    except Exception:
+        LOGGER.exception("exception on session get for %s", url)
         raise
 
 
@@ -548,50 +579,49 @@ def download_worker(
                 cursor.fetchone())
             # find planet bounding boxes
             LOGGER.debug('fetching %s', (lat_min, lng_min, lat_max, lng_max))
-            mosaic_quad_response = get_bounding_box_quads(
+            mosaic_item_list = get_bounding_box_quads(
                 session, mosaic_quad_list_url,
                 lng_min, lat_min, lng_max, lat_max)
-            mosaic_quad_response_dict = mosaic_quad_response.json()
-            LOGGER.debug(mosaic_quad_response_dict)
-            time.sleep(20)
             # download all the quads that match
-            for mosaic_item in mosaic_quad_response_dict['items']:
-                download_url = (mosaic_item['_links']['download'])
-                suffix_subdir = os.path.join(
-                    *reversed(mosaic_item["id"][-4::]))
-                download_raster_path = os.path.join(
-                    planet_quads_dir, suffix_subdir,
-                    '%s.tif' % mosaic_item["id"])
+            while True:
+                for mosaic_item in mosaic_item_list:
+                    download_url = (mosaic_item['_links']['download'])
+                    suffix_subdir = os.path.join(
+                        *reversed(mosaic_item["id"][-4::]))
+                    download_raster_path = os.path.join(
+                        planet_quads_dir, suffix_subdir,
+                        '%s.tif' % mosaic_item["id"])
 
-                download_worker_task_graph.add_task(
-                    func=download_url_to_file,
-                    args=(download_url, download_raster_path),
-                    target_path_list=[download_raster_path],
-                    task_name='download %s' % os.path.basename(
-                        download_raster_path))
-                download_worker_task_graph.join()
+                    download_worker_task_graph.add_task(
+                        func=download_url_to_file,
+                        args=(download_url, download_raster_path),
+                        target_path_list=[download_raster_path],
+                        task_name='download %s' % os.path.basename(
+                            download_raster_path))
+                    download_worker_task_graph.join()
 
-                # get bounding box for mosaic
-                # make a new entry in the FRAGMENT_ID_STATUS_MAP
-                raster_info = pygeoprocessing.get_raster_info(
-                    download_raster_path)
-                raster_wgs84_bb = pygeoprocessing.transform_bounding_box(
-                    raster_info['bounding_box'], raster_info['projection'],
-                    wgs84_wkt)
+                    # get bounding box for mosaic
+                    # make a new entry in the FRAGMENT_ID_STATUS_MAP
+                    raster_info = pygeoprocessing.get_raster_info(
+                        download_raster_path)
+                    raster_wgs84_bb = pygeoprocessing.transform_bounding_box(
+                        raster_info['bounding_box'], raster_info['projection'],
+                        wgs84_wkt)
 
-                fragment_id = '%s_%s' % (grid_id, mosaic_item['id'])
-                LOGGER.debug(raster_info)
-                with GLOBAL_LOCK:
-                    FRAGMENT_ID_STATUS_MAP[fragment_id] = {
-                        'bounds':
-                            [[raster_wgs84_bb[1], raster_wgs84_bb[0]],
-                             [raster_wgs84_bb[3], raster_wgs84_bb[2]]],
-                        'color': STATE_TO_COLOR['downloaded'],
-                        'fill': 'false',
-                    }
+                    fragment_id = '%s_%s' % (grid_id, mosaic_item['id'])
+                    LOGGER.debug(raster_info)
+                    with GLOBAL_LOCK:
+                        FRAGMENT_ID_STATUS_MAP[fragment_id] = {
+                            'bounds':
+                                [[raster_wgs84_bb[1], raster_wgs84_bb[0]],
+                                 [raster_wgs84_bb[3], raster_wgs84_bb[2]]],
+                            'color': STATE_TO_COLOR['downloaded'],
+                            'fill': 'false',
+                        }
 
-                LOGGER.debug('downloaded %s', download_url)
-                inference_queue.put((fragment_id, download_raster_path))
+                    LOGGER.debug('downloaded %s', download_url)
+                    inference_queue.put((fragment_id, download_raster_path))
+
             LOGGER.debug(
                 '# TODO: update the status to indicate grid is downloaded')
             cursor.close()
