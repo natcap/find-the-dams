@@ -272,7 +272,6 @@ def get_bounding_box_quads(
                 'mosaic_quad_dict[\'items\'][0] type: %s',
                 type(mosaic_quad_dict['items'][0]))
             LOGGER.debug(mosaic_quad_dict['items'][0])
-            time.sleep(2)
 
             if '_next' in mosaic_quad_dict['_links']:
                 mosaic_quad_response = guarded_session_get(
