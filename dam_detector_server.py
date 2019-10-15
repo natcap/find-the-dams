@@ -509,6 +509,8 @@ def schedule_worker(download_work_pipe, readonly_database_uri):
             download_work_pipe.send(grid_id)
             with GLOBAL_LOCK:
                 WORKING_GRID_ID_STATUS_MAP[grid_id] = 'scheduled'
+            # wait for ack
+            _ = download_work_pipe.recv()
 
         while True:
             connection = sqlite3.connect(readonly_database_uri, uri=True)
@@ -540,6 +542,8 @@ def schedule_worker(download_work_pipe, readonly_database_uri):
             connection.commit()
             LOGGER.debug('scheduling grid %s', grid_id)
             download_work_pipe.send(grid_id)
+            # wait for acknowledgment
+            _ = download_work_pipe.recv()
             with GLOBAL_LOCK:
                 WORKING_GRID_ID_STATUS_MAP[grid_id] = 'scheduled'
     except Exception:
@@ -584,6 +588,8 @@ def download_worker(
 
         while True:
             grid_id = download_worker_pipe.recv()
+            # send ack so worker can go to next one
+            download_worker_pipe.send('ack')
             LOGGER.debug('about to fetch grid_id %s', grid_id)
             with GLOBAL_LOCK:
                 connection = sqlite3.connect(database_path)
@@ -645,6 +651,8 @@ def download_worker(
 
                 LOGGER.debug('downloaded %s', download_url)
                 inference_pipe.send((quad_id, download_raster_path))
+                # wait for ack
+                inference_pipe.recv()
 
             with GLOBAL_LOCK:
                 connection = sqlite3.connect(database_path)
@@ -721,6 +729,7 @@ def inference_worker(
         wgs84_srs.ImportFromEPSG(4326)
         while True:
             quad_id, quad_raster_path = inference_pipe.recv()
+            inference_pipe.send('ack')
             quad_workspace = os.path.join(
                 WORKSPACE_DIR, '%s_%s' % (worker_id, quad_id))
             try:
@@ -1031,10 +1040,8 @@ def main():
     ro_database_uri = 'file:%s?mode=ro' % DATABASE_PATH
     database_path = DATABASE_PATH
 
-    download_worker_pipe, download_scheduler_pipe = multiprocessing.Pipe(
-        False)
-    inference_worker_pipe, inference_scheduler_pipe = multiprocessing.Pipe(
-        False)
+    download_worker_pipe, download_scheduler_pipe = multiprocessing.Pipe()
+    inference_worker_pipe, inference_scheduler_pipe = multiprocessing.Pipe()
 
     # wait until the database is initialized before scheduling work
     initalize_database_task.join()
