@@ -483,8 +483,7 @@ def schedule_worker(download_work_queue, readonly_database_uri):
             'SELECT grid_id FROM grid_status '
             'WHERE processing_state="scheduled" '
             'AND grid_id not in (' + ','.join([
-                str(x) for x in WORKING_GRID_ID_STATUS_MAP.keys()]) +
-            ') ORDER BY RANDOM() LIMIT 1;')
+                str(x) for x in WORKING_GRID_ID_STATUS_MAP.keys()]) + ');')
         cursor = connection.cursor()
         cursor.execute(query_string)
         pre_scheduled_id_list = [payload[0] for payload in cursor]
