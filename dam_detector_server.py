@@ -268,17 +268,12 @@ def get_bounding_box_quads(
         while True:
             mosaic_quad_dict = mosaic_quad_response.json()
             items_list.extend(mosaic_quad_dict['items'])
-            LOGGER.debug(
-                'mosaic_quad_dict[\'items\'][0] type: %s',
-                type(mosaic_quad_dict['items'][0]))
-            LOGGER.debug(mosaic_quad_dict['items'][0])
-
             if '_next' in mosaic_quad_dict['_links']:
                 mosaic_quad_response = guarded_session_get(
                     session, mosaic_quad_dict['_links']['_next'])
             else:
                 break
-        return mosaic_quad_response
+        return items_list
     except Exception:
         LOGGER.exception(
             "get_bounding_box_quads %f, %f, %f, %f, failed" % (
@@ -590,7 +585,6 @@ def download_worker(
             # download all the quads that match
             while True:
                 for mosaic_index, mosaic_item in enumerate(mosaic_item_list):
-                    LOGGER.debug('mosaic %d: %s', mosaic_index, mosaic_item)
                     download_url = (mosaic_item['_links']['download'])
                     suffix_subdir = os.path.join(
                         *reversed(mosaic_item["id"][-4::]))
