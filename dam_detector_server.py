@@ -494,7 +494,7 @@ def schedule_worker(download_work_queue, readonly_database_uri):
             LOGGER.debug('scheduling grid %s', grid_id)
             download_work_queue.put(grid_id)
             with GLOBAL_LOCK:
-                WORKING_GRID_ID_STATUS_MAP[grid_id] = grid_id
+                WORKING_GRID_ID_STATUS_MAP[grid_id] = 'scheduled'
 
         while True:
             connection = sqlite3.connect(readonly_database_uri, uri=True)
