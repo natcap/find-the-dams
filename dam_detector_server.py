@@ -723,6 +723,7 @@ def inference_worker(
             current_dam_id = cursor.fetchone()[0]
             cursor.close()
             connection.commit()
+        LOGGER.debug('current_dam_id is %s %s', current_dam_id, type(current_dam_id))
 
         tf_graph = load_model(tf_model_path)
         wgs84_srs = osr.SpatialReference()
