@@ -5,7 +5,9 @@ Launch like this:
 
 sudo docker build docker-image/ -t therealspring/dam-detection:0.0.1
 
-hg pull && hg up && sudo docker run -it --rm -p 80:80 -v `pwd`:/workspace therealspring/dam-detection:0.0.1 "nohup python dam_detector_server.py"
+hg pull && hg up && sudo docker run -it --rm -p 80:80 -v
+    `pwd`:/workspace therealspring/dam-detection:0.0.1
+    "python dam_detector_server.py"
 
 There are x steps:
 0) check to see if anything was interrupted on the last run
@@ -52,11 +54,10 @@ These are the questions we can answer during processing:
     * what dams weren't detected? (i.e. a quad was processed with a dam in it
       that wasn't found)
 """
-import time
+import argparse
 import multiprocessing
 import uuid
 import shutil
-import queue
 import threading
 import datetime
 import json
@@ -108,6 +109,8 @@ LOGGER = logging.getLogger(__name__)
 WORKSPACE_DIR = 'workspace'
 DAM_IMAGE_WORKSPACE = os.path.join(WORKSPACE_DIR, 'identified_dam_imagery')
 DATABASE_PATH = os.path.join(WORKSPACE_DIR, 'find-the-dams.db')
+INITALIZE_DATABASE_TOKEN_PATH = os.path.join(
+    WORKSPACE_DIR, 'initalize_spatial_search_units.COMPLETE')
 PLANET_API_KEY_FILE = 'planet_api_key.txt'
 ACTIVE_MOSAIC_JSON_PATH = os.path.join(WORKSPACE_DIR, 'active_mosaic.json')
 REQUEST_TIMEOUT = 5
@@ -202,7 +205,8 @@ def processing_status():
                 cursor.fetchall()
             }
             for pre_known_dam_id, pre_known_dam_info in KNOWN_DAM_MAP.items():
-                polygons_to_update['pre_known_%s' % pre_known_dam_id] = pre_known_dam_info
+                polygons_to_update['pre_known_%s' % pre_known_dam_id] = (
+                    pre_known_dam_info)
         else:
             polygons_to_update = {}
 
@@ -585,7 +589,8 @@ def download_worker(
                 connection = sqlite3.connect(database_path)
                 cursor = connection.cursor()
                 cursor.execute(
-                    'SELECT processing_state, lat_min, lng_min, lat_max, lng_max '
+                    'SELECT '
+                    'processing_state, lat_min, lng_min, lat_max, lng_max '
                     'FROM grid_status '
                     'WHERE grid_id=?', (grid_id,))
                 (processing_state, lat_min, lng_min, lat_max, lng_max) = (
@@ -766,10 +771,12 @@ def inference_worker(
                             to_wgs84 = osr.CoordinateTransformation(
                                 source_srs, wgs84_srs)
                             ul_point = ogr.Geometry(ogr.wkbPoint)
-                            ul_point.AddPoint(coord_tuple[0][0], coord_tuple[0][1])
+                            ul_point.AddPoint(
+                                coord_tuple[0][0], coord_tuple[0][1])
                             ul_point.Transform(to_wgs84)
                             lr_point = ogr.Geometry(ogr.wkbPoint)
-                            lr_point.AddPoint(coord_tuple[1][0], coord_tuple[1][1])
+                            lr_point.AddPoint(
+                                coord_tuple[1][0], coord_tuple[1][1])
                             lr_point.Transform(to_wgs84)
                             LOGGER.debug(
                                 'found dams at %s %s image %s',
@@ -822,16 +829,16 @@ def inference_worker(
         LOGGER.exception("Exception in inference_worker")
 
 
-def do_detection(detection_graph, threshold_level, image_path,
+def do_detection(tf_graph, threshold_level, image_path,
                  dam_image_workspace, grid_tag):
     """Detect whatever the graph is supposed to detect on a single image.
 
     Parameters:
-        detection_graph (tensorflow Graph): a loaded graph that can accept
+        tf_graph (tensorflow Graph): a loaded graph that can accept
             images of the size in `image_path`.
         threshold_level (float): the confidence threshold level to cut off
             classification
-        image_path (str): path to an image that `detection_graph` can parse.
+        image_path (str): path to an image that `tf_graph` can parse.
         dam_image_workspace (str): path to a directory that can save images.
         grid_tag (str): tag to attach to image file names
 
@@ -845,14 +852,14 @@ def do_detection(detection_graph, threshold_level, image_path,
          base_array[1, :, :],
          base_array[2, :, :]])
     LOGGER.debug('detection on %s', image_path)
-    with detection_graph.as_default():
-        with tf.Session(graph=detection_graph) as sess:
+    with tf_graph.as_default():
+        with tf.Session(graph=tf_graph) as sess:
             image_array_expanded = numpy.expand_dims(image_array, axis=0)
-            image_tensor = detection_graph.get_tensor_by_name('image_tensor:0')
-            box = detection_graph.get_tensor_by_name('detection_boxes:0')
-            score = detection_graph.get_tensor_by_name('detection_scores:0')
-            clss = detection_graph.get_tensor_by_name('detection_classes:0')
-            num_detections = detection_graph.get_tensor_by_name('num_detections:0')
+            image_tensor = tf_graph.get_tensor_by_name('image_tensor:0')
+            box = tf_graph.get_tensor_by_name('detection_boxes:0')
+            score = tf_graph.get_tensor_by_name('detection_scores:0')
+            clss = tf_graph.get_tensor_by_name('detection_classes:0')
+            num_detections = tf_graph.get_tensor_by_name('num_detections:0')
 
             (box_list, score_list, _, _) = sess.run(
                 [box, score, clss, num_detections],
@@ -963,13 +970,11 @@ def main():
             os.makedirs(dirname)
         except OSError:
             pass
-    initalize_token_path = os.path.join(
-        WORKSPACE_DIR, 'initalize_spatial_search_units.COMPLETE')
     task_graph = taskgraph.TaskGraph(WORKSPACE_DIR, -1, 5.0)
     initalize_database_task = task_graph.add_task(
         func=initalize_spatial_search_units,
-        args=(DATABASE_PATH, initalize_token_path),
-        target_path_list=[initalize_token_path],
+        args=(DATABASE_PATH, INITALIZE_DATABASE_TOKEN_PATH),
+        target_path_list=[INITALIZE_DATABASE_TOKEN_PATH],
         ignore_path_list=[DATABASE_PATH],
         task_name='initialize database')
 
@@ -1097,6 +1102,24 @@ def main():
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(
+        description='Start dam detection server.')
+    parser.add_argument(
+        '--clear_database', type=bool, action='store_true',
+        help='backs up the dam database and starts over')
+    args = parser.parse_args(sys.argv)
+    if args['clear_database']:
+        os.remove(INITALIZE_DATABASE_TOKEN_PATH)
+        db_base_path, db_extension = os.path.splitext(DATABASE_PATH)
+        timestamp_string = (
+            str(datetime.datetime.now()).replace(
+                ' ', '_').replace(':', '_').replace('.', '_'))
+        db_backup_path = '%s_%s%s' % (
+                db_base_path, timestamp_string, db_extension)
+        LOGGER.warn('moving old database to %s' % db_backup_path)
+        shutil.copyfile(
+            DATABASE_PATH, db_backup_path)
+
     GLOBAL_LOCK = threading.Lock()
     WORKING_GRID_ID_STATUS_MAP = {}
     FRAGMENT_ID_STATUS_MAP = {}
