@@ -966,7 +966,7 @@ def main():
     initalize_token_path = os.path.join(
         WORKSPACE_DIR, 'initalize_spatial_search_units.COMPLETE')
     task_graph = taskgraph.TaskGraph(WORKSPACE_DIR, -1, 5.0)
-    task_graph.add_task(
+    initalize_database_task = task_graph.add_task(
         func=initalize_spatial_search_units,
         args=(DATABASE_PATH, initalize_token_path),
         target_path_list=[initalize_token_path],
@@ -1031,6 +1031,8 @@ def main():
     inference_worker_pipe, inference_scheduler_pipe = multiprocessing.Pipe(
         False)
 
+    # wait until the database is initialized before scheduling work
+    initalize_database_task.join()
     schedule_worker_thread = threading.Thread(
         target=schedule_worker,
         args=(download_scheduler_pipe, ro_database_uri))
