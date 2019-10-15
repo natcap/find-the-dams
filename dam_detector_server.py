@@ -583,44 +583,43 @@ def download_worker(
                 session, mosaic_quad_list_url,
                 lng_min, lat_min, lng_max, lat_max)
             # download all the quads that match
-            while True:
-                for mosaic_index, mosaic_item in enumerate(mosaic_item_list):
-                    download_url = (mosaic_item['_links']['download'])
-                    suffix_subdir = os.path.join(
-                        *reversed(mosaic_item["id"][-4::]))
-                    download_raster_path = os.path.join(
-                        planet_quads_dir, suffix_subdir,
-                        '%s.tif' % mosaic_item["id"])
+            for mosaic_index, mosaic_item in enumerate(mosaic_item_list):
+                download_url = (mosaic_item['_links']['download'])
+                suffix_subdir = os.path.join(
+                    *reversed(mosaic_item["id"][-4::]))
+                download_raster_path = os.path.join(
+                    planet_quads_dir, suffix_subdir,
+                    '%s.tif' % mosaic_item["id"])
 
-                    download_worker_task_graph.add_task(
-                        func=download_url_to_file,
-                        args=(download_url, download_raster_path),
-                        target_path_list=[download_raster_path],
-                        task_name='download %s' % os.path.basename(
-                            download_raster_path))
-                    download_worker_task_graph.join()
+                download_worker_task_graph.add_task(
+                    func=download_url_to_file,
+                    args=(download_url, download_raster_path),
+                    target_path_list=[download_raster_path],
+                    task_name='download %s' % os.path.basename(
+                        download_raster_path))
+                download_worker_task_graph.join()
 
-                    # get bounding box for mosaic
-                    # make a new entry in the FRAGMENT_ID_STATUS_MAP
-                    raster_info = pygeoprocessing.get_raster_info(
-                        download_raster_path)
-                    raster_wgs84_bb = pygeoprocessing.transform_bounding_box(
-                        raster_info['bounding_box'], raster_info['projection'],
-                        wgs84_wkt)
+                # get bounding box for mosaic
+                # make a new entry in the FRAGMENT_ID_STATUS_MAP
+                raster_info = pygeoprocessing.get_raster_info(
+                    download_raster_path)
+                raster_wgs84_bb = pygeoprocessing.transform_bounding_box(
+                    raster_info['bounding_box'], raster_info['projection'],
+                    wgs84_wkt)
 
-                    fragment_id = '%s_%s' % (grid_id, mosaic_item['id'])
-                    LOGGER.debug(raster_info)
-                    with GLOBAL_LOCK:
-                        FRAGMENT_ID_STATUS_MAP[fragment_id] = {
-                            'bounds':
-                                [[raster_wgs84_bb[1], raster_wgs84_bb[0]],
-                                 [raster_wgs84_bb[3], raster_wgs84_bb[2]]],
-                            'color': STATE_TO_COLOR['downloaded'],
-                            'fill': 'false',
-                        }
+                fragment_id = '%s_%s' % (grid_id, mosaic_item['id'])
+                LOGGER.debug(raster_info)
+                with GLOBAL_LOCK:
+                    FRAGMENT_ID_STATUS_MAP[fragment_id] = {
+                        'bounds':
+                            [[raster_wgs84_bb[1], raster_wgs84_bb[0]],
+                             [raster_wgs84_bb[3], raster_wgs84_bb[2]]],
+                        'color': STATE_TO_COLOR['downloaded'],
+                        'fill': 'false',
+                    }
 
-                    LOGGER.debug('downloaded %s', download_url)
-                    inference_queue.put((fragment_id, download_raster_path))
+                LOGGER.debug('downloaded %s', download_url)
+                inference_queue.put((fragment_id, download_raster_path))
 
             LOGGER.debug(
                 '# TODO: update the status to indicate grid is downloaded')
