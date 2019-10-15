@@ -189,6 +189,7 @@ def processing_status():
 
             # construct a return object that indicated which polygons should be
             # updated on the client
+
             polygons_to_update = {
                 grid_id: {
                     'bounds': [[lat_min, lng_min], [lat_max, lng_max]],
@@ -199,7 +200,7 @@ def processing_status():
                 cursor.fetchall()
             }
             for pre_known_dam_id, pre_known_dam_info in KNOWN_DAM_MAP.items():
-                polygons_to_update[pre_known_dam_id] = pre_known_dam_info
+                polygons_to_update['pre_known_%s' % pre_known_dam_id] = pre_known_dam_info
         else:
             polygons_to_update = {}
 
