@@ -92,7 +92,7 @@ logging.basicConfig(
         '%(asctime)s (%(relativeCreated)d) %(levelname)s %(name)s'
         ' [%(funcName)s:%(lineno)d] %(message)s'),
     stream=sys.stdout)
-logging.getLogger('taskgraph').setLevel(logging.INFO)
+logging.getLogger('taskgraph').setLevel(logging.DEBUG)
 
 DAM_BOUNDING_BOX_URL = (
     'https://storage.googleapis.com/natcap-natgeo-dam-ecoshards/'
@@ -332,50 +332,38 @@ def initalize_spatial_search_units(database_path, complete_token_path):
         DAM_BOUNDING_BOX_URL, dam_bounding_box_bb_path)
     DATABASE_STATUS_STR = "parse dam bounding box database for valid dams"
     LOGGER.debug(DATABASE_STATUS_STR)
-    global KNOWN_DAM_MAP
-    KNOWN_DAM_MAP = {}
-    try:
-        connection = sqlite3.connect(dam_bounding_box_bb_path)
-        cursor = connection.cursor()
-        cursor.execute(
-            "SELECT "
-            "bounding_box_bounds, metadata, validation_table.key, "
-            "database_id, description "
-            "FROM validation_table "
-            "INNER JOIN base_table on base_table.key = validation_table.key;")
-        spatial_analysis_unit_list = []
-        for payload in cursor:
-            (bounding_box_bounds_raw, metadata_raw,
-             key, database_id, description) = payload
-            metadata = json.loads(metadata_raw)
-            if 'checkbox_values' in metadata and (
-                    any(metadata['checkbox_values'].values())):
-                continue
-            if 'comments' in metadata and (
-                    'dry' in metadata['comments'].lower()):
-                continue
-            bounding_box_dict = ast.literal_eval(bounding_box_bounds_raw)
-            if bounding_box_dict is None:
-                continue
-            lat_min, lat_max = list(sorted([
-                x['lat'] for x in bounding_box_dict]))
-            lng_min, lng_max = list(sorted([
-                x['lng'] for x in bounding_box_dict]))
-            spatial_analysis_unit_list.append(
-                (key, 1, '%s:%s' % (database_id, description), lat_min,
-                 lng_min, lat_max, lng_max))
+    connection = sqlite3.connect(dam_bounding_box_bb_path)
+    cursor = connection.cursor()
+    cursor.execute(
+        "SELECT "
+        "bounding_box_bounds, metadata, validation_table.key, "
+        "database_id, description "
+        "FROM validation_table "
+        "INNER JOIN base_table on base_table.key = validation_table.key;")
+    spatial_analysis_unit_list = []
+    for payload in cursor:
+        (bounding_box_bounds_raw, metadata_raw,
+         key, database_id, description) = payload
+        metadata = json.loads(metadata_raw)
+        if 'checkbox_values' in metadata and (
+                any(metadata['checkbox_values'].values())):
+            continue
+        if 'comments' in metadata and (
+                'dry' in metadata['comments'].lower()):
+            continue
+        bounding_box_dict = ast.literal_eval(bounding_box_bounds_raw)
+        if bounding_box_dict is None:
+            continue
+        lat_min, lat_max = list(sorted([
+            x['lat'] for x in bounding_box_dict]))
+        lng_min, lng_max = list(sorted([
+            x['lng'] for x in bounding_box_dict]))
+        spatial_analysis_unit_list.append(
+            (key, 1, '%s:%s' % (database_id, description), lat_min,
+             lng_min, lat_max, lng_max))
 
-            KNOWN_DAM_MAP[key] = {
-                'color': DAM_STATE_COLOR['pre_known'],
-                'bounds': [
-                    [lat_min, lng_min],
-                    [lat_max, lng_max]],
-            }
-    except Exception:
-        LOGGER.exception("Exception encountered.")
-    finally:
-        cursor.close()
-        connection.commit()
+    cursor.close()
+    connection.commit()
 
     DATABASE_STATUS_STR = (
         "insert valid validated dams into `identified_dams` table")
@@ -674,15 +662,13 @@ def inference_worker(inference_queue, database_path, worker_id, tf_model_path):
                 for j_off in range(0, y_size, FRAGMENT_SIZE[1]):
                     ul_corner = gdal.ApplyGeoTransform(
                         raster_info['geotransform'], i_off, j_off)
+                    # guard against a clip that's too big
                     lr_corner = gdal.ApplyGeoTransform(
                         raster_info['geotransform'],
-                        i_off+FRAGMENT_SIZE[0], j_off+FRAGMENT_SIZE[1])
+                        min(i_off+FRAGMENT_SIZE[0], x_size),
+                        min(j_off+FRAGMENT_SIZE[1], y_size))
                     xmin, xmax = sorted([ul_corner[0], lr_corner[0]])
                     ymin, ymax = sorted([ul_corner[1], lr_corner[1]])
-                    if xmax > x_size:
-                        xmax = x_size
-                    if ymax > y_size:
-                        ymax = y_size
                     clipped_raster_path = os.path.join(
                         quad_workspace, '%d_%d.tif' % (i_off, j_off))
                     LOGGER.debug("clip to %s", [xmin, ymin, xmax, ymax])
@@ -907,6 +893,46 @@ def main():
         target_path_list=[initalize_token_path],
         ignore_path_list=[DATABASE_PATH],
         task_name='initialize database')
+
+    # go through dam bounding box to put it in global map
+    dam_bounding_box_bb_path = os.path.join(
+        WORKSPACE_DIR, os.path.basename(DAM_BOUNDING_BOX_URL))
+    global KNOWN_DAM_MAP
+    KNOWN_DAM_MAP = {}
+    connection = sqlite3.connect(dam_bounding_box_bb_path)
+    cursor = connection.cursor()
+    cursor.execute(
+        "SELECT "
+        "bounding_box_bounds, metadata, validation_table.key, "
+        "database_id, description "
+        "FROM validation_table "
+        "INNER JOIN base_table on base_table.key = validation_table.key;")
+    for payload in cursor:
+        (bounding_box_bounds_raw, metadata_raw,
+         key, database_id, description) = payload
+        metadata = json.loads(metadata_raw)
+        if 'checkbox_values' in metadata and (
+                any(metadata['checkbox_values'].values())):
+            continue
+        if 'comments' in metadata and (
+                'dry' in metadata['comments'].lower()):
+            continue
+        bounding_box_dict = ast.literal_eval(bounding_box_bounds_raw)
+        if bounding_box_dict is None:
+            continue
+        lat_min, lat_max = list(sorted([
+            x['lat'] for x in bounding_box_dict]))
+        lng_min, lng_max = list(sorted([
+            x['lng'] for x in bounding_box_dict]))
+
+        KNOWN_DAM_MAP[key] = {
+            'color': DAM_STATE_COLOR['pre_known'],
+            'bounds': [
+                [lat_min, lng_min],
+                [lat_max, lng_max]],
+        }
+    cursor.close()
+    connection.commit()
 
     inference_model_path = os.path.join(
         WORKSPACE_DIR, os.path.basename(INFERENCE_MODEL_URL))
