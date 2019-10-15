@@ -1108,7 +1108,7 @@ if __name__ == '__main__':
         '--clear_database', action='store_true',
         help='backs up the dam database and starts over')
     args = parser.parse_args()
-    if args['clear_database']:
+    if args.clear_database:
         os.remove(INITALIZE_DATABASE_TOKEN_PATH)
         db_base_path, db_extension = os.path.splitext(DATABASE_PATH)
         timestamp_string = (
