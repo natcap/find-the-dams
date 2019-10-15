@@ -719,11 +719,10 @@ def inference_worker(
         with GLOBAL_LOCK:
             connection = sqlite3.connect(database_path)
             cursor = connection.cursor()
-            cursor.execute('SELECT max(dam_id) from identified_dams')
-            current_dam_id = cursor.fetchone()[0]
+            cursor.execute('SELECT max(cast(dam_id as integer)) from identified_dams')
+            current_dam_id = int(cursor.fetchone()[0])
             cursor.close()
             connection.commit()
-        LOGGER.debug('current_dam_id is %s %s', current_dam_id, type(current_dam_id))
 
         tf_graph = load_model(tf_model_path)
         wgs84_srs = osr.SpatialReference()
