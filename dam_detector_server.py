@@ -534,17 +534,17 @@ def schedule_worker(download_work_queue, readonly_database_uri):
 
 
 def download_worker(
-        download_work_queue, inference_queue, database_uri, planet_api_key,
+        download_work_queue, inference_queue, database_path, planet_api_key,
         mosaic_quad_list_url, planet_quads_dir):
     """Fetch Planet quads as requested.
 
     Parameters:
         download_work_queue (queue): this function will pull from this queue
             and expect grid ids whose location can be found in the database at
-            `database_uri`.
+            `database_path`.
         inference_queue (queue): Planet quads that need the data inference
             pipeline scheduled will be pushed down this queue.
-        database_uri (str): URI to sqlite database.
+        database_path (str): path to writable sqlite database.
         planet_api_key (str): key to access Planet's RESTful API.
         mosaic_quad_list_url (str): url that has the Planet global mosaic to
             query for individual quads.
@@ -573,20 +573,20 @@ def download_worker(
             grid_id = download_work_queue.get()
             LOGGER.debug('about to fetch grid_id %s', grid_id)
             with GLOBAL_LOCK:
-                connection = sqlite3.connect(database_uri, uri=True)
+                connection = sqlite3.connect(database_path)
                 cursor = connection.cursor()
                 cursor.execute(
                     'SELECT processing_state, lat_min, lng_min, lat_max, lng_max '
                     'FROM grid_status '
                     'WHERE grid_id=?', (grid_id,))
+                (processing_state, lat_min, lng_min, lat_max, lng_max) = (
+                    cursor.fetchone())
                 cursor.execute(
                     'UPDATE grid_status '
                     'SET processing_state="scheduled" WHERE grid_id=?',
                     (grid_id,))
-                (processing_state, lat_min, lng_min, lat_max, lng_max) = (
-                    cursor.fetchone())
-                cursor.close()
                 connection.commit()
+                cursor.close()
             # find planet bounding boxes
             LOGGER.debug('fetching %s', (lat_min, lng_min, lat_max, lng_max))
             mosaic_item_list = get_bounding_box_quads(
@@ -633,7 +633,7 @@ def download_worker(
                 inference_queue.put((fragment_id, download_raster_path))
 
             with GLOBAL_LOCK:
-                connection = sqlite3.connect(database_uri, uri=True)
+                connection = sqlite3.connect(database_path)
                 cursor = connection.cursor()
                 cursor.execute(
                     'UPDATE grid_status '
@@ -1004,7 +1004,6 @@ def main():
         task_name='download TF model')
     task_graph.join()
     ro_database_uri = 'file:%s?mode=ro' % DATABASE_PATH
-    w_database_uri = 'file:%s?mode=w' % DATABASE_PATH
     database_path = DATABASE_PATH
 
     download_work_queue = queue.Queue(1)
@@ -1057,7 +1056,7 @@ def main():
     download_worker_thread = threading.Thread(
         target=download_worker,
         args=(
-            download_work_queue, inference_queue, w_database_uri,
+            download_work_queue, inference_queue, DATABASE_PATH,
             planet_api_key, mosaic_quad_list_url, planet_quads_dir))
     download_worker_thread.start()
 
