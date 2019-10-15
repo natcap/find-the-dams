@@ -559,6 +559,7 @@ def download_worker(
                 download_raster_path = os.path.join(
                     planet_quads_dir, suffix_subdir,
                     '%s.tif' % mosaic_item["id"])
+
                 download_worker_task_graph.add_task(
                     func=download_url_to_file,
                     args=(download_url, download_raster_path),
@@ -623,7 +624,8 @@ def download_url_to_file(url, target_file_path):
         raise
 
 
-def inference_worker(inference_queue, database_path, worker_id, tf_model_path):
+def inference_worker(
+        inference_queue, database_path, worker_id, tf_model_path):
     """Take large quads and search for dams.
 
     Parameters:
@@ -633,6 +635,13 @@ def inference_worker(inference_queue, database_path, worker_id, tf_model_path):
             for dam bounding boxes.
         database_path (str): URI to writeable version of database to store
             found dams.
+        worker_id (int): a unique ID to identify which worker so we can
+            uniquely identify each dam.
+        tf_model_path (str): path to a frozen TensorFlow graph that will be
+            loaded to do inference.
+
+    Returns:
+        None.
 
     """
     tf_dam_count = 0
@@ -946,7 +955,7 @@ def main():
     database_path = DATABASE_PATH
 
     download_work_queue = queue.Queue(2)
-    inference_queue = queue.Queue()
+    inference_queue = queue.Queue(1)
 
     schedule_worker_thread = threading.Thread(
         target=schedule_worker,
