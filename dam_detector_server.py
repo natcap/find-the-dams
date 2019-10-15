@@ -813,7 +813,7 @@ def inference_worker(
 
                                 cursor.execute(
                                     'UPDATE quad_status quad_id=?, '
-                                    'processing_state=complete', (quad_id,))
+                                    'processing_state="complete"', (quad_id,))
 
                                 cursor.close()
                                 connection.commit()
