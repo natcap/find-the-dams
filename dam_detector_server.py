@@ -1105,7 +1105,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description='Start dam detection server.')
     parser.add_argument(
-        '--clear_database', type=bool, action='store_true',
+        '--clear_database', action='store_true',
         help='backs up the dam database and starts over')
     args = parser.parse_args(sys.argv)
     if args['clear_database']:
