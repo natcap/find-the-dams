@@ -267,8 +267,6 @@ def get_bounding_box_quads(
 
         while True:
             mosaic_quad_dict = mosaic_quad_response.json()
-            LOGGER.debug(mosaic_quad_dict['items'])
-            time.sleep(5)
             items_list.extend(mosaic_quad_dict['items'])
             if '_next' in mosaic_quad_dict['_links']:
                 mosaic_quad_response = guarded_session_get(
@@ -586,7 +584,8 @@ def download_worker(
                 lng_min, lat_min, lng_max, lat_max)
             # download all the quads that match
             while True:
-                for mosaic_item in mosaic_item_list:
+                for mosaic_index, mosaic_item in enumerate(mosaic_item_list):
+                    LOGGER.debug('mosaic %d: %s', mosaic_index, mosaic_item)
                     download_url = (mosaic_item['_links']['download'])
                     suffix_subdir = os.path.join(
                         *reversed(mosaic_item["id"][-4::]))
