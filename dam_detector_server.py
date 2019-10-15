@@ -53,6 +53,7 @@ These are the questions we can answer during processing:
       that wasn't found)
 """
 import time
+import multiprocessing
 import uuid
 import shutil
 import queue
@@ -471,12 +472,13 @@ def initalize_spatial_search_units(database_path, complete_token_path):
     DATABASE_STATUS_STR = None
 
 
-def schedule_worker(download_work_queue, readonly_database_uri):
+def schedule_worker(download_work_pipe, readonly_database_uri):
     """Thread to schedule areas to prioritize.
 
     Parameters:
-        download_work_queue (queue): this queue is used to communicate which
-            grid IDs should be scheduled for downloading next
+        download_work_pipe (multiprocessing.Connection): this pipe is used to
+            communicate which grid IDs should be scheduled for downloading
+            next.
         readonly_database_uri (str): uri to readonly view of Sqlite3 database.
 
     Returns:
@@ -500,7 +502,7 @@ def schedule_worker(download_work_queue, readonly_database_uri):
         connection.commit()
         for grid_id in pre_scheduled_id_list:
             LOGGER.debug('scheduling grid %s', grid_id)
-            download_work_queue.put(grid_id)
+            download_work_pipe.send(grid_id)
             with GLOBAL_LOCK:
                 WORKING_GRID_ID_STATUS_MAP[grid_id] = 'scheduled'
 
@@ -533,7 +535,7 @@ def schedule_worker(download_work_queue, readonly_database_uri):
             cursor.close()
             connection.commit()
             LOGGER.debug('scheduling grid %s', grid_id)
-            download_work_queue.put(grid_id)
+            download_work_pipe.send(grid_id)
             with GLOBAL_LOCK:
                 WORKING_GRID_ID_STATUS_MAP[grid_id] = 'scheduled'
     except Exception:
@@ -542,16 +544,15 @@ def schedule_worker(download_work_queue, readonly_database_uri):
 
 
 def download_worker(
-        download_work_queue, inference_queue, database_path, planet_api_key,
+        download_worker_pipe, inference_pipe, database_path, planet_api_key,
         mosaic_quad_list_url, planet_quads_dir):
     """Fetch Planet quads as requested.
 
     Parameters:
-        download_work_queue (queue): this function will pull from this queue
-            and expect grid ids whose location can be found in the database at
-            `database_path`.
-        inference_queue (queue): Planet quads that need the data inference
-            pipeline scheduled will be pushed down this queue.
+        download_worker_pipe (multiprocessing.Connection): this pipe will
+            serve the next grid ID to download quads for.
+        inference_pipe (multiprocessing.Connection): this pipe is used to
+            send planet quad id/path tuples for the inference worker.
         database_path (str): path to writable sqlite database.
         planet_api_key (str): key to access Planet's RESTful API.
         mosaic_quad_list_url (str): url that has the Planet global mosaic to
@@ -578,7 +579,7 @@ def download_worker(
         wgs84_srs = None
 
         while True:
-            grid_id = download_work_queue.get()
+            grid_id = download_worker_pipe.recv()
             LOGGER.debug('about to fetch grid_id %s', grid_id)
             with GLOBAL_LOCK:
                 connection = sqlite3.connect(database_path)
@@ -638,7 +639,7 @@ def download_worker(
                     }
 
                 LOGGER.debug('downloaded %s', download_url)
-                inference_queue.put((quad_id, download_raster_path))
+                inference_pipe.send((quad_id, download_raster_path))
 
             with GLOBAL_LOCK:
                 connection = sqlite3.connect(database_path)
@@ -681,11 +682,11 @@ def download_url_to_file(url, target_file_path):
 
 
 def inference_worker(
-        inference_queue, database_path, worker_id, tf_model_path):
+        inference_pipe, database_path, worker_id, tf_model_path):
     """Take large quads and search for dams.
 
     Parameters:
-        inference_queue (queue): will get
+        inference_pipe (multiprocessing.Connection): will get
             ('fragment_id', 'quad_raster_path') tuples where
             'quad_raster_path' is a path to a geotiff that can be searched
             for dam bounding boxes.
@@ -714,8 +715,7 @@ def inference_worker(
         wgs84_srs = osr.SpatialReference()
         wgs84_srs.ImportFromEPSG(4326)
         while True:
-            quad_id, quad_raster_path = inference_queue.get()
-            continue
+            quad_id, quad_raster_path = inference_pipe.recv()
             quad_workspace = os.path.join(
                 WORKSPACE_DIR, '%s_%s' % (worker_id, quad_id))
             try:
@@ -1026,12 +1026,14 @@ def main():
     ro_database_uri = 'file:%s?mode=ro' % DATABASE_PATH
     database_path = DATABASE_PATH
 
-    download_work_queue = queue.Queue(1)
-    inference_queue = queue.Queue(1)
+    download_scheduler_pipe, download_worker_pipe = multiprocessing.Pipe(
+        False)
+    inference_scheduler_pipe, inference_worker_pipe = multiprocessing.Pipe(
+        False)
 
     schedule_worker_thread = threading.Thread(
         target=schedule_worker,
-        args=(download_work_queue, ro_database_uri))
+        args=(download_scheduler_pipe, ro_database_uri))
     schedule_worker_thread.start()
 
     # find the most recent mosaic we can use
@@ -1076,14 +1078,14 @@ def main():
     download_worker_thread = threading.Thread(
         target=download_worker,
         args=(
-            download_work_queue, inference_queue, DATABASE_PATH,
+            download_worker_pipe, inference_scheduler_pipe, DATABASE_PATH,
             planet_api_key, mosaic_quad_list_url, planet_quads_dir))
     download_worker_thread.start()
 
     worker_id = 0
     inference_worker_thread = threading.Thread(
         target=inference_worker,
-        args=(inference_queue, database_path, worker_id,
+        args=(inference_worker_pipe, database_path, worker_id,
               inference_model_path))
     inference_worker_thread.start()
 
