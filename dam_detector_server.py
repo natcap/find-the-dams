@@ -572,14 +572,21 @@ def download_worker(
         while True:
             grid_id = download_work_queue.get()
             LOGGER.debug('about to fetch grid_id %s', grid_id)
-            connection = sqlite3.connect(database_uri, uri=True)
-            cursor = connection.cursor()
-            cursor.execute(
-                'SELECT processing_state, lat_min, lng_min, lat_max, lng_max '
-                'FROM grid_status '
-                'WHERE grid_id=?', (grid_id,))
-            (processing_state, lat_min, lng_min, lat_max, lng_max) = (
-                cursor.fetchone())
+            with GLOBAL_LOCK:
+                connection = sqlite3.connect(database_uri, uri=True)
+                cursor = connection.cursor()
+                cursor.execute(
+                    'SELECT processing_state, lat_min, lng_min, lat_max, lng_max '
+                    'FROM grid_status '
+                    'WHERE grid_id=?', (grid_id,))
+                cursor.execute(
+                    'UPDATE grid_status '
+                    'SET processing_state="scheduled" WHERE grid_id=?',
+                    (grid_id,))
+                (processing_state, lat_min, lng_min, lat_max, lng_max) = (
+                    cursor.fetchone())
+                cursor.close()
+                connection.commit()
             # find planet bounding boxes
             LOGGER.debug('fetching %s', (lat_min, lng_min, lat_max, lng_max))
             mosaic_item_list = get_bounding_box_quads(
@@ -625,10 +632,15 @@ def download_worker(
                 LOGGER.debug('downloaded %s', download_url)
                 inference_queue.put((fragment_id, download_raster_path))
 
-            LOGGER.debug(
-                '# TODO: update the status to indicate grid is downloaded')
-            cursor.close()
-            connection.commit()
+            with GLOBAL_LOCK:
+                connection = sqlite3.connect(database_uri, uri=True)
+                cursor = connection.cursor()
+                cursor.execute(
+                    'UPDATE grid_status '
+                    'SET processing_state="scheduled" WHERE grid_id=?',
+                    (grid_id,))
+                cursor.close()
+                connection.commit()
     except Exception:
         LOGGER.exception('exception in fetch worker')
 
@@ -1044,7 +1056,7 @@ def main():
     download_worker_thread = threading.Thread(
         target=download_worker,
         args=(
-            download_work_queue, inference_queue, ro_database_uri,
+            download_work_queue, inference_queue, database_uri,
             planet_api_key, mosaic_quad_list_url, planet_quads_dir))
     download_worker_thread.start()
 
