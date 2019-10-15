@@ -1004,6 +1004,7 @@ def main():
         task_name='download TF model')
     task_graph.join()
     ro_database_uri = 'file:%s?mode=ro' % DATABASE_PATH
+    w_database_uri = 'file:%s?mode=w' % DATABASE_PATH
     database_path = DATABASE_PATH
 
     download_work_queue = queue.Queue(1)
@@ -1056,7 +1057,7 @@ def main():
     download_worker_thread = threading.Thread(
         target=download_worker,
         args=(
-            download_work_queue, inference_queue, database_uri,
+            download_work_queue, inference_queue, w_database_uri,
             planet_api_key, mosaic_quad_list_url, planet_quads_dir))
     download_worker_thread.start()
 
