@@ -52,6 +52,7 @@ These are the questions we can answer during processing:
     * what dams weren't detected? (i.e. a quad was processed with a dam in it
       that wasn't found)
 """
+import time
 import uuid
 import shutil
 import queue
@@ -551,6 +552,8 @@ def download_worker(
                 session, mosaic_quad_list_url,
                 lng_min, lat_min, lng_max, lat_max)
             mosaic_quad_response_dict = mosaic_quad_response.json()
+            LOGGER.debug(mosaic_quad_response_dict)
+            time.sleep(20)
             # download all the quads that match
             for mosaic_item in mosaic_quad_response_dict['items']:
                 download_url = (mosaic_item['_links']['download'])
