@@ -1026,9 +1026,9 @@ def main():
     ro_database_uri = 'file:%s?mode=ro' % DATABASE_PATH
     database_path = DATABASE_PATH
 
-    download_scheduler_pipe, download_worker_pipe = multiprocessing.Pipe(
+    download_worker_pipe, download_scheduler_pipe = multiprocessing.Pipe(
         False)
-    inference_scheduler_pipe, inference_worker_pipe = multiprocessing.Pipe(
+    inference_worker_pipe, inference_scheduler_pipe = multiprocessing.Pipe(
         False)
 
     schedule_worker_thread = threading.Thread(
