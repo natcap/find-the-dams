@@ -128,8 +128,8 @@ STATE_TO_COLOR = {
 }
 
 DAM_STATE_COLOR = {
-    'identified': '#3300FF',
-    'pre_known': '#808080',
+    'identified': '#33FF00',
+    'pre_known': '#000F0',
 }
 
 NEXT_STATE = {
