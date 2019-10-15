@@ -651,7 +651,7 @@ def inference_worker(
         wgs84_srs.ImportFromEPSG(4326)
         while True:
             fragment_id, quad_raster_path = inference_queue.get()
-
+            continue
             quad_workspace = os.path.join(
                 WORKSPACE_DIR, '%s_%s' % (worker_id, fragment_id))
             try:
@@ -954,7 +954,7 @@ def main():
     ro_database_uri = 'file:%s?mode=ro' % DATABASE_PATH
     database_path = DATABASE_PATH
 
-    download_work_queue = queue.Queue(2)
+    download_work_queue = queue.Queue(1)
     inference_queue = queue.Queue(1)
 
     schedule_worker_thread = threading.Thread(
