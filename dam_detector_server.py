@@ -192,7 +192,8 @@ def processing_status():
             polygons_to_update = {
                 grid_id: {
                     'bounds': [[lat_min, lng_min], [lat_max, lng_max]],
-                    'color': STATE_TO_COLOR[state]
+                    'color': STATE_TO_COLOR[state],
+                    'fill': 'true',
                 } for (
                     grid_id, state, lat_min, lng_min, lat_max, lng_max) in
                 cursor.fetchall()
