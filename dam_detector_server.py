@@ -219,8 +219,8 @@ def processing_status():
                 else:
                     polygons_to_update[grid_id] = {
                         'color': STATE_TO_COLOR[status],
-                        'fill': 'true',
-                        'weight': 1,
+                        'fill': 'false',
+                        'weight': 3,
                     }
 
         # count how many polygons just for reference
