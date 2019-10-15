@@ -129,7 +129,7 @@ STATE_TO_COLOR = {
 
 DAM_STATE_COLOR = {
     'identified': '#33FF00',
-    'pre_known': '#000F0',
+    'pre_known': '#0000F0',
 }
 
 NEXT_STATE = {
@@ -195,6 +195,7 @@ def processing_status():
                     'bounds': [[lat_min, lng_min], [lat_max, lng_max]],
                     'color': STATE_TO_COLOR[state],
                     'fill': 'true',
+                    'weight': 1,
                 } for (
                     grid_id, state, lat_min, lng_min, lat_max, lng_max) in
                 cursor.fetchall()
