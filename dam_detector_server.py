@@ -679,7 +679,10 @@ def inference_worker(inference_queue, database_path, worker_id, tf_model_path):
                         i_off+FRAGMENT_SIZE[0], j_off+FRAGMENT_SIZE[1])
                     xmin, xmax = sorted([ul_corner[0], lr_corner[0]])
                     ymin, ymax = sorted([ul_corner[1], lr_corner[1]])
-
+                    if xmax > x_size:
+                        xmax = x_size
+                    if ymax > y_size:
+                        ymax = y_size
                     clipped_raster_path = os.path.join(
                         quad_workspace, '%d_%d.tif' % (i_off, j_off))
                     LOGGER.debug("clip to %s", [xmin, ymin, xmax, ymax])
