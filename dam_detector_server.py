@@ -603,7 +603,8 @@ def download_worker(
                     cursor.fetchone())
                 cursor.execute(
                     'UPDATE grid_status '
-                    'SET processing_state="scheduled" WHERE grid_id=?',
+                    'SET processing_state="scheduled" '
+                    'WHERE grid_id=?',
                     (grid_id,))
                 connection.commit()
                 cursor.close()
@@ -659,7 +660,8 @@ def download_worker(
                 cursor = connection.cursor()
                 cursor.execute(
                     'UPDATE grid_status '
-                    'SET processing_state="scheduled" WHERE grid_id=?',
+                    'SET processing_state="scheduled" '
+                    'WHERE grid_id=?',
                     (grid_id,))
                 cursor.close()
                 connection.commit()
@@ -812,8 +814,9 @@ def inference_worker(
                                     dam_list)
 
                                 cursor.execute(
-                                    'UPDATE quad_status quad_id=?, '
-                                    'processing_state="complete"', (quad_id,))
+                                    'UPDATE quad_status '
+                                    'SET processing_state="complete"'
+                                    'WHERE quad_id=?', (quad_id,))
 
                                 cursor.close()
                                 connection.commit()
