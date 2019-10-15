@@ -330,6 +330,15 @@ def initalize_spatial_search_units(database_path, complete_token_path):
         CREATE UNIQUE INDEX sa_id_idx
         ON grid_status (grid_id);
 
+        CREATE TABLE quad_status (
+            quad_id TEXT NOT NULL PRIMARY KEY,
+            processing_state TEXT NOT NULL);
+
+        CREATE INDEX sa_quad_id
+            ON quad_status (quad_id);
+        CREATE INDEX sa_processing_state
+            ON quad_status (processing_state);
+
         CREATE TABLE identified_dams (
             dam_id TEXT NOT NULL,
             pre_known INTEGER NOT NULL,
@@ -616,10 +625,10 @@ def download_worker(
                     raster_info['bounding_box'], raster_info['projection'],
                     wgs84_wkt)
 
-                fragment_id = '%s_%s' % (grid_id, mosaic_item['id'])
+                quad_id = '%s_%s' % (grid_id, mosaic_item['id'])
                 LOGGER.debug(raster_info)
                 with GLOBAL_LOCK:
-                    FRAGMENT_ID_STATUS_MAP[fragment_id] = {
+                    FRAGMENT_ID_STATUS_MAP[quad_id] = {
                         'bounds':
                             [[raster_wgs84_bb[1], raster_wgs84_bb[0]],
                              [raster_wgs84_bb[3], raster_wgs84_bb[2]]],
@@ -629,7 +638,7 @@ def download_worker(
                     }
 
                 LOGGER.debug('downloaded %s', download_url)
-                inference_queue.put((fragment_id, download_raster_path))
+                inference_queue.put((quad_id, download_raster_path))
 
             with GLOBAL_LOCK:
                 connection = sqlite3.connect(database_path)
@@ -691,16 +700,24 @@ def inference_worker(
         None.
 
     """
-    tf_dam_count = 0
     try:
+
+        with GLOBAL_LOCK:
+            connection = sqlite3.connect(database_path)
+            cursor = connection.cursor()
+            cursor.execute('SELECT max(dam_id) from identified_dams')
+            current_dam_id = cursor.fetchone()[0]
+            cursor.close()
+            connection.commit()
+
         tf_graph = load_model(tf_model_path)
         wgs84_srs = osr.SpatialReference()
         wgs84_srs.ImportFromEPSG(4326)
         while True:
-            fragment_id, quad_raster_path = inference_queue.get()
+            quad_id, quad_raster_path = inference_queue.get()
             continue
             quad_workspace = os.path.join(
-                WORKSPACE_DIR, '%s_%s' % (worker_id, fragment_id))
+                WORKSPACE_DIR, '%s_%s' % (worker_id, quad_id))
             try:
                 os.makedirs(quad_workspace)
             except OSError:
@@ -709,7 +726,7 @@ def inference_worker(
             LOGGER.debug('doing inference on %s', quad_raster_path)
             LOGGER.debug('search for dam bounding boxes in this region')
             with GLOBAL_LOCK:
-                FRAGMENT_ID_STATUS_MAP[fragment_id]['color'] = (
+                FRAGMENT_ID_STATUS_MAP[quad_id]['color'] = (
                     STATE_TO_COLOR['analyzing'])
 
             raster_info = pygeoprocessing.get_raster_info(quad_raster_path)
@@ -739,7 +756,7 @@ def inference_worker(
                     detection_result = do_detection(
                         tf_graph, THRESHOLD_LEVEL, clipped_raster_path,
                         DAM_IMAGE_WORKSPACE, '%s_%s' % (
-                            worker_id, fragment_id))
+                            worker_id, quad_id))
                     if detection_result:
                         dam_list = []
                         image_bb_path, coord_list = detection_result
@@ -749,7 +766,6 @@ def inference_worker(
                             to_wgs84 = osr.CoordinateTransformation(
                                 source_srs, wgs84_srs)
                             ul_point = ogr.Geometry(ogr.wkbPoint)
-                            LOGGER.debug("*********** coord_tuple: %s", coord_tuple)
                             ul_point.AddPoint(coord_tuple[0][0], coord_tuple[0][1])
                             ul_point.Transform(to_wgs84)
                             lr_point = ogr.Geometry(ogr.wkbPoint)
@@ -760,13 +776,13 @@ def inference_worker(
                                 str((ul_point.GetX(), ul_point.GetY())),
                                 str((lr_point.GetX(), lr_point.GetY())),
                                 image_bb_path)
+                            current_dam_id += 1
                             dam_list.append((
-                                'tf_%d_%d' % (worker_id, tf_dam_count),
-                                0, 'TensorFlow identified dam %d_%d' % (
-                                    worker_id, tf_dam_count),
+                                current_dam_id, 0,
+                                'TensorFlow identified dam %d' % (
+                                    current_dam_id),
                                 lr_point.GetY(), lr_point.GetX(),
                                 ul_point.GetY(), ul_point.GetX()))
-                            tf_dam_count += 1
 
                         if dam_list:
                             with GLOBAL_LOCK:
@@ -778,12 +794,17 @@ def inference_worker(
                                     'lat_min, lng_min, lat_max, '
                                     'lng_max) VALUES(?, ?, ?, ?, ?, ?, ?)',
                                     dam_list)
+
+                                cursor.execute(
+                                    'UPDATE quad_status quad_id=?, '
+                                    'processing_state=complete', (quad_id,))
+
                                 cursor.close()
                                 connection.commit()
 
                             for (dam_id, _, _, lat_min,
                                     lng_min, lat_max, lng_max) in (dam_list):
-                                fragment_dam_id = '%s_%s' % (fragment_id, dam_id)
+                                fragment_dam_id = '%s_%s' % (quad_id, dam_id)
                                 IDENTIFIED_DAM_MAP[fragment_dam_id] = {
                                     'color': DAM_STATE_COLOR['identified'],
                                     'bounds': [
@@ -795,7 +816,7 @@ def inference_worker(
             LOGGER.debug('removing workspace %s', quad_workspace)
             shutil.rmtree(quad_workspace)
             with GLOBAL_LOCK:
-                FRAGMENT_ID_STATUS_MAP[fragment_id]['color'] = (
+                FRAGMENT_ID_STATUS_MAP[quad_id]['color'] = (
                     STATE_TO_COLOR['complete'])
     except Exception:
         LOGGER.exception("Exception in inference_worker")
