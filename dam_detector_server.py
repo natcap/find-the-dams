@@ -197,6 +197,8 @@ def processing_status():
                     grid_id, state, lat_min, lng_min, lat_max, lng_max) in
                 cursor.fetchall()
             }
+            for pre_known_dam_id, pre_known_dam_info in KNOWN_DAM_MAP.items():
+                polygons_to_update[pre_known_dam_id] = pre_known_dam_info
         else:
             polygons_to_update = {}
 
@@ -213,7 +215,9 @@ def processing_status():
                         STATE_TO_COLOR[status])
                 else:
                     polygons_to_update[grid_id] = {
-                        'color': STATE_TO_COLOR[status]
+                        'color': STATE_TO_COLOR[status],
+                        'fill': 'true',
+                        'weight': 1,
                     }
 
         # count how many polygons just for reference
@@ -616,6 +620,7 @@ def download_worker(
                              [raster_wgs84_bb[3], raster_wgs84_bb[2]]],
                         'color': STATE_TO_COLOR['downloaded'],
                         'fill': 'false',
+                        'weight': 3,
                     }
 
                 LOGGER.debug('downloaded %s', download_url)
@@ -774,6 +779,8 @@ def inference_worker(
                                     'bounds': [
                                         [lat_min, lng_min],
                                         [lat_max, lng_max]],
+                                    'fill': 'false',
+                                    'weight': 1,
                                 }
             LOGGER.debug('removing workspace %s', quad_workspace)
             shutil.rmtree(quad_workspace)
@@ -971,6 +978,8 @@ def main():
             'bounds': [
                 [lat_min, lng_min],
                 [lat_max, lng_max]],
+            'fill': 'false',
+            'weight': 1,
         }
     cursor.close()
     connection.commit()
