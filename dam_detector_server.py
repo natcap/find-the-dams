@@ -1,5 +1,5 @@
 # coding=UTF-8
-"""This server will pull unclassified tiles and attempt to find dams in them.
+"""This server will pull unclassified quads and attempt to find dams in them.
 
 Launch like this:
 
@@ -36,20 +36,20 @@ There are x steps:
 
 5) search imagery for dams w/ NN inference pipeline or Azure ML service
    pipeline?
-    * this will involve breaking larger tiles into fragments to analyze
+    * this will involve breaking larger quads into fragments to analyze
     * these fragments will also be searched for *known* dams
 These are the states:
     * unscheduled (static state)
     * scheduled (volatile state)
     * downloaded (static state)
-    * inference data on tile (volatile state)
-    * complete on tile (static state)
+    * inference data on quad (volatile state)
+    * complete on quad (static state)
 
 These are the questions we can answer during processing:
     * what is being done right now?
     * how many dams have been discovered?
     * what does a particular dam look like?
-    * what dams weren't detected? (i.e. a tile was processed with a dam in it
+    * what dams weren't detected? (i.e. a quad was processed with a dam in it
       that wasn't found)
 """
 import uuid
@@ -109,8 +109,8 @@ DATABASE_PATH = os.path.join(WORKSPACE_DIR, 'find-the-dams.db')
 PLANET_API_KEY_FILE = 'planet_api_key.txt'
 ACTIVE_MOSAIC_JSON_PATH = os.path.join(WORKSPACE_DIR, 'active_mosaic.json')
 REQUEST_TIMEOUT = 5
-DICE_SIZE = (419, 419)  # how to dice global quads.
-THRESHOLD_LEVEL = 0.07
+FRAGMENT_SIZE = (419, 419)  # dims to fragment a Planet quad
+THRESHOLD_LEVEL = 0.08
 DATABASE_STATUS_STR = None
 GLOBAL_LOCK = None
 WORKING_GRID_ID_STATUS_MAP = None
@@ -328,13 +328,8 @@ def initalize_spatial_search_units(database_path, complete_token_path):
 
     dam_bounding_box_bb_path = os.path.join(
         WORKSPACE_DIR, os.path.basename(DAM_BOUNDING_BOX_URL))
-    if not os.path.exists(dam_bounding_box_bb_path):
-        dam_bounding_box_bb_tmp_path = '%s.tmp' % dam_bounding_box_bb_path
-        DATABASE_STATUS_STR = "download validated dam bounding box database"
-        LOGGER.debug(DATABASE_STATUS_STR)
-        urllib.request.urlretrieve(
-            DAM_BOUNDING_BOX_URL, dam_bounding_box_bb_tmp_path)
-        os.rename(dam_bounding_box_bb_tmp_path, dam_bounding_box_bb_path)
+    urllib.request.urlretrieve(
+        DAM_BOUNDING_BOX_URL, dam_bounding_box_bb_path)
     DATABASE_STATUS_STR = "parse dam bounding box database for valid dams"
     LOGGER.debug(DATABASE_STATUS_STR)
     global KNOWN_DAM_MAP
@@ -458,6 +453,26 @@ def schedule_worker(download_work_queue, readonly_database_uri):
     """
     try:
         LOGGER.debug('starting schedule worker')
+        # iterate through database and check the status of grids, anything
+        # that was "scheduled" needs to be re-queued.
+        connection = sqlite3.connect(readonly_database_uri, uri=True)
+        query_string = (
+            'SELECT grid_id FROM grid_status '
+            'WHERE processing_state="scheduled" '
+            'AND grid_id not in (' + ','.join([
+                str(x) for x in WORKING_GRID_ID_STATUS_MAP.keys()]) +
+            ') ORDER BY RANDOM() LIMIT 1;')
+        cursor = connection.cursor()
+        cursor.execute(query_string)
+        pre_scheduled_id_list = [payload[0] for payload in cursor]
+        cursor.close()
+        connection.commit()
+        for grid_id in pre_scheduled_id_list:
+            LOGGER.debug('scheduling grid %s', grid_id)
+            download_work_queue.put(grid_id)
+            with GLOBAL_LOCK:
+                WORKING_GRID_ID_STATUS_MAP[grid_id] = grid_id
+
         while True:
             connection = sqlite3.connect(readonly_database_uri, uri=True)
             cursor = connection.cursor()
@@ -484,14 +499,12 @@ def schedule_worker(download_work_queue, readonly_database_uri):
                         str(x) for x in WORKING_GRID_ID_STATUS_MAP.keys()]) +
                     ') ORDER BY RANDOM() LIMIT 1;')
                 (grid_id,) = cursor.fetchone()
+            cursor.close()
+            connection.commit()
             LOGGER.debug('scheduling grid %s', grid_id)
             download_work_queue.put(grid_id)
             with GLOBAL_LOCK:
                 WORKING_GRID_ID_STATUS_MAP[grid_id] = 'scheduled'
-            cursor.close()
-            connection.commit()
-            # this will only do the first grid
-            break
     except Exception:
         LOGGER.exception('exception in schedule worker')
     LOGGER.debug("schedule worker is terminating!")
@@ -500,21 +513,21 @@ def schedule_worker(download_work_queue, readonly_database_uri):
 def download_worker(
         download_work_queue, inference_queue, database_uri, planet_api_key,
         mosaic_quad_list_url, planet_quads_dir):
-    """Fetch Planet tiles as requested.
+    """Fetch Planet quads as requested.
 
     Parameters:
-        download_work_queue (queue): this function will pull from this queue and
-            expect grid ids whose location can be found in the database at
+        download_work_queue (queue): this function will pull from this queue
+            and expect grid ids whose location can be found in the database at
             `database_uri`.
-        inference_queue (queue): Planet tiles that need the data inference
+        inference_queue (queue): Planet quads that need the data inference
             pipeline scheduled will be pushed down this queue.
         database_uri (str): URI to sqlite database.
         planet_api_key (str): key to access Planet's RESTful API.
         mosaic_quad_list_url (str): url that has the Planet global mosaic to
-            query for individual tiles.
-        planet_quads_dir (str): directory to save downloaded planet tiles in.
+            query for individual quads.
+        planet_quads_dir (str): directory to save downloaded planet quads in.
             This function will make tree-like subdirectories under the main
-            directory based off the last 3 characters of the tile filename.
+            directory based off the last 3 characters of the quad filename.
 
     Returns:
         None.
@@ -550,7 +563,7 @@ def download_worker(
                 session, mosaic_quad_list_url,
                 lng_min, lat_min, lng_max, lat_max)
             mosaic_quad_response_dict = mosaic_quad_response.json()
-            # download all the tiles that match
+            # download all the quads that match
             for mosaic_item in mosaic_quad_response_dict['items']:
                 download_url = (mosaic_item['_links']['download'])
                 suffix_subdir = os.path.join(
@@ -623,11 +636,12 @@ def download_url_to_file(url, target_file_path):
 
 
 def inference_worker(inference_queue, database_path, worker_id, tf_model_path):
-    """Take large tiles and search for dams.
+    """Take large quads and search for dams.
 
     Parameters:
-        inference_queue (queue): will get ('fragment_id', 'tile_path') tuples
-            where 'tile_path' is a path to a geotiff that can be searched
+        inference_queue (queue): will get
+            ('fragment_id', 'quad_raster_path') tuples where
+            'quad_raster_path' is a path to a geotiff that can be searched
             for dam bounding boxes.
         database_path (str): URI to writeable version of database to store
             found dams.
@@ -639,7 +653,7 @@ def inference_worker(inference_queue, database_path, worker_id, tf_model_path):
         wgs84_srs = osr.SpatialReference()
         wgs84_srs.ImportFromEPSG(4326)
         while True:
-            fragment_id, tile_path = inference_queue.get()
+            fragment_id, quad_raster_path = inference_queue.get()
 
             quad_workspace = os.path.join(
                 WORKSPACE_DIR, '%s_%s' % (worker_id, fragment_id))
@@ -648,21 +662,21 @@ def inference_worker(inference_queue, database_path, worker_id, tf_model_path):
             except OSError:
                 pass
 
-            LOGGER.debug('doing inference on %s', tile_path)
+            LOGGER.debug('doing inference on %s', quad_raster_path)
             LOGGER.debug('search for dam bounding boxes in this region')
             with GLOBAL_LOCK:
                 FRAGMENT_ID_STATUS_MAP[fragment_id]['color'] = (
                     STATE_TO_COLOR['analyzing'])
 
-            raster_info = pygeoprocessing.get_raster_info(tile_path)
+            raster_info = pygeoprocessing.get_raster_info(quad_raster_path)
             x_size, y_size = raster_info['raster_size']
-            for i_off in range(0, x_size, DICE_SIZE[0]):
-                for j_off in range(0, y_size, DICE_SIZE[1]):
+            for i_off in range(0, x_size, FRAGMENT_SIZE[0]):
+                for j_off in range(0, y_size, FRAGMENT_SIZE[1]):
                     ul_corner = gdal.ApplyGeoTransform(
                         raster_info['geotransform'], i_off, j_off)
                     lr_corner = gdal.ApplyGeoTransform(
                         raster_info['geotransform'],
-                        i_off+DICE_SIZE[0], j_off+DICE_SIZE[1])
+                        i_off+FRAGMENT_SIZE[0], j_off+FRAGMENT_SIZE[1])
                     xmin, xmax = sorted([ul_corner[0], lr_corner[0]])
                     ymin, ymax = sorted([ul_corner[1], lr_corner[1]])
 
@@ -670,7 +684,7 @@ def inference_worker(inference_queue, database_path, worker_id, tf_model_path):
                         quad_workspace, '%d_%d.tif' % (i_off, j_off))
                     LOGGER.debug("clip to %s", [xmin, ymin, xmax, ymax])
                     pygeoprocessing.warp_raster(
-                        tile_path, raster_info['pixel_size'],
+                        quad_raster_path, raster_info['pixel_size'],
                         clipped_raster_path, 'near',
                         target_bb=[xmin, ymin, xmax, ymax])
                     # TODO: get the list of bb coords here and then make
