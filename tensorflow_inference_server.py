@@ -246,7 +246,7 @@ def inference_worker(tf_graph_path, work_queue):
         LOGGER.debug('processing %s', png_path)
         dam_image_workspace = os.path.join(WORKSPACE_DIR, session_id)
         try:
-            os.path.makedirs(dam_image_workspace)
+            os.makedirs(dam_image_workspace)
         except OSError:
             pass
         try:
