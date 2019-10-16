@@ -28,7 +28,7 @@ APP = Flask(__name__, static_url_path='', static_folder='')
 APP_ROOT = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_FOLDER = os.path.join(APP_ROOT, 'od_workspace')
 THRESHOLD_LEVEL = 0.08
-TF_GRAPH_PATH = 'models/fasterRCNN_08-26-withnotadams_md5_83f58894e34e1e785fcaa2dbc1d3ec7a.pb'
+TF_GRAPH_PATH = sys.argv[1]
 
 
 try:
@@ -42,7 +42,7 @@ except OSError:
 
 # Configure Flask app and the logo upload folder
 APP.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-APP_PORT = 8080
+APP_PORT = int(sys.argv[2])
 
 # map session ids to current state
 # can be
