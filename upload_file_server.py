@@ -50,19 +50,28 @@ def detect_dam_init():
 @APP.route('/api/v1/detect_dam/<string:session_id>', methods=['PUT'])
 def detect_dam(session_id):
     """Flask entry point."""
-    if session_id not in SESSION_MANAGER_MAP:
-        return ('%s not a valid session', 400)
     with SESSION_MANAGER_LOCK:
-        if SESSION_MANAGER_MAP[session_id] != 'waiting for upload':
+        if session_id not in SESSION_MANAGER_MAP:
+            return ('%s not a valid session', 400)
+        session_state = SESSION_MANAGER_MAP[session_id]
+    if flask.request.method == 'PUT':
+        if session_state != 'waiting for upload':
             return (
                 '%s in state %s' % session_id,
-                SESSION_MANAGER_MAP[session_id], 400)
-    print(flask.request.files['file'])
-    target_path = os.path.join(UPLOAD_FOLDER, session_id)
-    flask.request.files['file'].save(target_path)
-    with SESSION_MANAGER_LOCK:
-        SESSION_MANAGER_MAP[session_id] = 'processing'
-    return "200"
+                session_state, 400)
+        print(flask.request.files['file'])
+        target_path = os.path.join(UPLOAD_FOLDER, '%s.png' % session_id)
+        flask.request.files['file'].save(target_path)
+        with SESSION_MANAGER_LOCK:
+            SESSION_MANAGER_MAP[session_id] = 'processing'
+        return "200"
+    else:
+        if session_state.startswith('http'):
+            return (session_state, 200)
+        else:
+            return (session_state, 500)
+
+
 
 
 if __name__ == '__main__':
