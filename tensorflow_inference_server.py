@@ -254,5 +254,5 @@ if __name__ == '__main__':
     WORK_QUEUE = queue.Queue()
     thread = threading.Thread(
         target=inference_worker,
-        args(TF_GRAPH_PATH, WORK_QUEUE))
+        args=(TF_GRAPH_PATH, WORK_QUEUE))
     APP.run(host='0.0.0.0', port=APP_PORT)
