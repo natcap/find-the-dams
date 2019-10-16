@@ -274,4 +274,5 @@ if __name__ == '__main__':
     thread = threading.Thread(
         target=inference_worker,
         args=(TF_GRAPH_PATH, WORK_QUEUE))
+    thread.start()
     APP.run(host='0.0.0.0', port=APP_PORT)
