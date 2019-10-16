@@ -11,10 +11,12 @@ import shapely.geometry
 import PIL
 import flask
 from flask import Flask
-#import tensorflow as tf
+import tensorflow as tf
 import numpy
 
 
+WORKSPACE_DIR = 'workspace_tf_server'
+ANNOTATED_IMAGE_DIR = os.path.join(WORKSPACE_DIR, 'annotated_images')
 logging.basicConfig(
     level=logging.DEBUG,
     format=(
@@ -24,7 +26,7 @@ logging.basicConfig(
 logging.getLogger('taskgraph').setLevel(logging.DEBUG)
 LOGGER = logging.getLogger(__name__)
 
-APP = Flask(__name__, static_url_path='', static_folder='')
+APP = Flask(__name__, static_url_path='', static_folder=WORKSPACE_DIR)
 APP_ROOT = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_FOLDER = os.path.join(APP_ROOT, 'od_workspace')
 THRESHOLD_LEVEL = 0.08
@@ -59,7 +61,9 @@ def detect_dam_init():
     session_id = str(uuid.uuid4())
     print(session_id)
     with SESSION_MANAGER_LOCK:
-        SESSION_MANAGER_MAP[session_id] = 'waiting for upload'
+        SESSION_MANAGER_MAP[session_id] = {
+            'status': 'waiting for upload'
+        }
     return {
         'upload_url': flask.url_for(
             'detect_dam', _external=True, session_id=session_id)
@@ -74,22 +78,37 @@ def detect_dam(session_id):
             return ('%s not a valid session', 400)
         session_state = SESSION_MANAGER_MAP[session_id]
     if flask.request.method == 'PUT':
-        if session_state != 'waiting for upload':
-            return (
-                '%s in state %s' % session_id,
-                session_state, 400)
+        if session_state['status'] != 'waiting for upload':
+            return ('file already uploaded', session_state, 400)
         print(flask.request.files['file'])
         target_path = os.path.join(UPLOAD_FOLDER, '%s.png' % session_id)
         flask.request.files['file'].save(target_path)
         WORK_QUEUE.put((session_id, target_path))
         with SESSION_MANAGER_LOCK:
-            SESSION_MANAGER_MAP[session_id] = 'processing'
-        return "200"
+            SESSION_MANAGER_MAP[session_id] = {
+                'status': 'processing'
+            }
+            return SESSION_MANAGER_MAP[session_id]
     else:
         if type(session_state) == dict:
             return session_state
         else:
             return (session_state, 500)
+
+
+@APP.route('/api/v1/get_status/<string:session_id>', methods=['GET'])
+def get_status(session_id):
+    """Returns status of processing."""
+    with SESSION_MANAGER_LOCK:
+        if session_id not in SESSION_MANAGER_MAP:
+            return ('%s not a valid session', 400)
+        return SESSION_MANAGER_MAP[session_id]
+
+
+@APP.route('/api/v1/download/<string:filename>', methods=['POST'])
+def download_result(filename):
+    """Download a result if possible."""
+    return flask.send_from_directory(ANNOTATED_IMAGE_DIR, filename)
 
 
 def do_detection(tf_graph, threshold_level, png_path):
@@ -169,7 +188,7 @@ def do_detection(tf_graph, threshold_level, png_path):
         bb_box_list.append(local_box)
 
     if bb_box_list:
-        LOGGER.debug('******** found a bounding box')
+        LOGGER.debug('*** found a bounding box')
         bb_list = []
         image = PIL.Image.fromarray(image_array).convert("RGB")
         image_draw = PIL.ImageDraw.Draw(image)
@@ -179,7 +198,9 @@ def do_detection(tf_graph, threshold_level, png_path):
             lr_corner = (float(box.bounds[2]), float(box.bounds[3]))
             bb_list.append((ul_corner, lr_corner))
         del image_draw
-        annotated_path = '%s_annotated.%s' % os.path.splitext(png_path)
+        annotated_path = os.path.join(
+            ANNOTATED_IMAGE_DIR,
+            '%s_annotated.%s' % os.path.splitext(png_path))
         image.save(annotated_path)
         return annotated_path, bb_list
     else:
@@ -237,14 +258,16 @@ def inference_worker(tf_graph_path, work_queue):
             payload = do_detection(tf_graph, THRESHOLD_LEVEL, png_path)
         except Exception as e:
             with SESSION_MANAGER_LOCK:
-                SESSION_MANAGER_MAP[session_id] = str(e.msg)
+                SESSION_MANAGER_MAP[session_id] = {
+                    'status': str(e.msg)
+                }
 
         with SESSION_MANAGER_LOCK:
             annotated_path, bb_list = payload
             SESSION_MANAGER_MAP[session_id] = {
                 'annotated_png': flask.url_for(
                     'download_result', _external=True,
-                    file_path=annotated_path),
+                    filename=os.path.basename(annotated_path)),
                 'bounding_box_list': bb_list}
 
 
