@@ -1,8 +1,6 @@
 # natcap/dam-inference-server:0.0.1
 FROM tensorflow/tensorflow:1.12.0-gpu-py3
 
-ENTRYPOINT ["/bin/bash", "-l", "-c"]
-
-COPY models/fasterRCNN_08-26-withnotadams_md5_83f58894e34e1e785fcaa2dbc1d3ec7a.pb /workdir/models
-
+COPY fasterRCNN_08-26-withnotadams_md5_83f58894e34e1e785fcaa2dbc1d3ec7a.pb /workdir/models
 WORKDIR /workdir
+ENTRYPOINT ["/bin/bash", "-l", "-c"]
