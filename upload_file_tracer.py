@@ -9,7 +9,7 @@ from osgeo import gdal
 import requests
 
 
-file_path = sys.argv[1]
+file_path = sys.argv[2]
 
 png_driver = gdal.GetDriverByName('PNG')
 base_image = gdal.OpenEx(file_path, gdal.OF_RASTER)
@@ -21,7 +21,8 @@ height, width = image.size
 image_array = numpy.array(image.getdata()).reshape((height, width, 3))
 print(image_array.shape)
 
-target_url = "http://localhost:8080/api/v1/detect_dam"
+host_and_port = sys.argv[1]
+target_url = "http://%s/api/v1/detect_dam" % host_and_port
 
 print('uploading %s to %s' % (file_path, target_url))
 
