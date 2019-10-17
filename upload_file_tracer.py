@@ -1,4 +1,5 @@
 """Tracer to upload file."""
+import os
 import sys
 import shutil
 
@@ -50,7 +51,9 @@ while True:
 
 if r.ok:
     print(r['bounding_box_list'])
-    local_filename = r['annotated_png_url'].split('/')[-1]
+    local_filename = r['annotated_png_base'].split('/')[-1]
+    annotated_png_url = os.path.join(target_url, r['annotated_png_url_base'])
+    print(annotated_png_url)
     with requests.get(r['annotated_png_url'], stream=True) as r:
         with open(local_filename, 'wb') as f:
             shutil.copyfileobj(r.raw, f)
