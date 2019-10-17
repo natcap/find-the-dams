@@ -28,7 +28,7 @@ logging.basicConfig(
 logging.getLogger('taskgraph').setLevel(logging.DEBUG)
 LOGGER = logging.getLogger(__name__)
 
-APP = Flask(__name__, static_url_path='', static_folder=WORKSPACE_DIR)
+APP = Flask(__name__, static_url_path='', static_folder='')
 APP_ROOT = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_FOLDER = os.path.join(APP_ROOT, 'od_workspace')
 THRESHOLD_LEVEL = 0.08
@@ -107,6 +107,8 @@ def get_status(session_id):
 @APP.route('/api/v1/download/<string:filename>', methods=['GET'])
 def download_result(filename):
     """Download a result if possible."""
+    LOGGER.debug('getting file: %s %s', filename, os.path.exists(
+        os.path.join(ANNOTATED_IMAGE_DIR, filename)))
     return flask.send_from_directory(ANNOTATED_IMAGE_DIR, filename)
 
 
