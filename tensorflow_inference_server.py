@@ -189,22 +189,21 @@ def do_detection(tf_graph, threshold_level, png_path):
 
     if bb_box_list:
         LOGGER.debug('*** found a bounding box')
-        bb_list = []
-        image = PIL.Image.fromarray(image_array).convert("RGB")
-        image_draw = PIL.ImageDraw.Draw(image)
-        for box in bb_box_list:
-            image_draw.rectangle(coords, outline='RED')
-            ul_corner = (float(box.bounds[0]), float(box.bounds[1]))
-            lr_corner = (float(box.bounds[2]), float(box.bounds[3]))
-            bb_list.append((ul_corner, lr_corner))
-        del image_draw
-        annotated_path = os.path.join(
-            ANNOTATED_IMAGE_DIR,
-            '%s_annotated.%s' % os.path.splitext(png_path))
-        image.save(annotated_path)
-        return annotated_path, bb_list
-    else:
-        return None
+
+    bb_list = []
+    image = PIL.Image.fromarray(image_array).convert("RGB")
+    image_draw = PIL.ImageDraw.Draw(image)
+    for box in bb_box_list:
+        image_draw.rectangle(coords, outline='RED')
+        ul_corner = (float(box.bounds[0]), float(box.bounds[1]))
+        lr_corner = (float(box.bounds[2]), float(box.bounds[3]))
+        bb_list.append((ul_corner, lr_corner))
+    del image_draw
+    annotated_path = os.path.join(
+        ANNOTATED_IMAGE_DIR,
+        '%s_annotated.%s' % os.path.splitext(png_path))
+    image.save(annotated_path)
+    return annotated_path, bb_list
 
 
 def load_model(path_to_model):
