@@ -107,9 +107,10 @@ def get_status(session_id):
 @APP.route('/api/v1/download/<string:filename>', methods=['GET'])
 def download_result(filename):
     """Download a result if possible."""
-    LOGGER.debug('getting file: %s %s', filename, os.path.exists(
-        os.path.join(ANNOTATED_IMAGE_DIR, filename)))
-    return flask.send_from_directory(ANNOTATED_IMAGE_DIR, filename)
+    local_path = os.path.join(ANNOTATED_IMAGE_DIR, filename)
+    LOGGER.debug(
+        'getting file: %s %s', local_path, os.path.exists(local_path))
+    return flask.send_from_directory('.', local_path)
 
 
 def do_detection(tf_graph, threshold_level, png_path):
@@ -280,7 +281,8 @@ def inference_worker(tf_graph_path, work_queue):
                 SESSION_MANAGER_MAP[session_id] = {
                     'status': 'complete',
                     'annotated_png_url_base': (
-                        '/api/v1/download/%s' % annotated_path),
+                        '/api/v1/download/%s' % os.path.basename(
+                            annotated_path)),
                     'bounding_box_list': bb_list,
                     'http_status_code': 200,
                 }
