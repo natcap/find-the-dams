@@ -104,7 +104,7 @@ def get_status(session_id):
         return session_map_to_response(SESSION_MANAGER_MAP[session_id])
 
 
-@APP.route('/api/v1/download/<string:filename>', methods=['POST'])
+@APP.route('/api/v1/download/<string:filename>', methods=['GET'])
 def download_result(filename):
     """Download a result if possible."""
     return flask.send_from_directory(ANNOTATED_IMAGE_DIR, filename)
