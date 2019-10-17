@@ -52,7 +52,7 @@ while True:
 
 if okay:
     print(r['bounding_box_list'])
-    local_filename = r['annotated_png_base'].split('/')[-1]
+    local_filename = r['annotated_png_url_base'].split('/')[-1]
     annotated_png_url = os.path.join(target_url, r['annotated_png_url_base'])
     print(annotated_png_url)
     with requests.get(r['annotated_png_url'], stream=True) as r:
