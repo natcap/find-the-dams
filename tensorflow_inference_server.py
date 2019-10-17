@@ -112,6 +112,7 @@ def get_status(session_id):
                     'download_result', _external=True,
                     filename=(
                         SESSION_MANAGER_MAP[session_id]['annotated_png_url'])))
+            LOGGER.debug('rewriting url %s', SESSION_MANAGER_MAP[session_id])
         return session_map_to_response(SESSION_MANAGER_MAP[session_id])
 
 
