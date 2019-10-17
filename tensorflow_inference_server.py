@@ -102,8 +102,10 @@ def detect_dam(session_id):
     flask.request.files['file'].save(target_path)
     WORK_QUEUE.put((session_id, target_path))
     with SESSION_MANAGER_LOCK:
-        LAST_ACCESSED_SESSION_MAP[session_id] = (
-            time.time(), )
+        LAST_ACCESSED_SESSION_MAP[session_id] = {
+            'last_time': time.time(),
+            'file_list': [target_path],
+        }
         SESSION_MANAGER_MAP[session_id] = {
             'status': 'processing',
             'status_url': flask.url_for(
@@ -119,6 +121,7 @@ def get_status(session_id):
     with SESSION_MANAGER_LOCK:
         if session_id not in SESSION_MANAGER_MAP:
             return "%s not found" % session_id, 400
+        LAST_ACCESSED_SESSION_MAP[session_id]['last_time'] = time.time()
         current_session = SESSION_MANAGER_MAP[session_id]
         if 'annotated_png_filename' in current_session:
             current_session['annotated_png_url'] = (
@@ -311,16 +314,46 @@ def inference_worker(tf_graph_path, work_queue):
                     'bounding_box_list': bb_list,
                     'http_status_code': 200,
                 }
+                LAST_ACCESSED_SESSION_MAP[session_id]['last_time'] = (
+                    time.time())
+                LAST_ACCESSED_SESSION_MAP[session_id]['file_list'].append(
+                    annotated_path)
         except Exception:
             LOGGER.exception('exception in inference worker')
+
+
+def garbage_collection():
+    """Periodically checks if LAST_ACESS_SESSION_MAP needs culling."""
+    while True:
+        try:
+            time.sleep(CLEANUP_WAIT_TIME)
+            current_time = time.time()
+            LOGGER.debug('garbage collecting, current time %s', current_time)
+            with SESSION_MANAGER_LOCK:
+                for session_id, access_map in \
+                        LAST_ACCESSED_SESSION_MAP.items():
+                    if (current_time > access_map['last_time'] +
+                            CLEANUP_WAIT_TIME):
+                        for file_path in access_map['file_path']:
+                            LOGGER.debug(
+                                'removing %s after %.2f seconds', file_path,
+                                current_time - access_map['last_time'])
+                            os.remove(file_path)
+                        del LAST_ACCESSED_SESSION_MAP[session_id]
+                        del SESSION_MANAGER_MAP[session_id]
+        except Exception:
+            LOGGER.exception('exception in `garbage_collection')
 
 
 if __name__ == '__main__':
     print(APP.root_path)
     SESSION_MANAGER_LOCK = threading.Lock()
     WORK_QUEUE = queue.Queue()
-    thread = threading.Thread(
+    inference_thread = threading.Thread(
         target=inference_worker,
         args=(TF_GRAPH_PATH, WORK_QUEUE))
-    thread.start()
+    inference_thread.start()
+    garbage_collection_thread = threading.Thread(target=garbage_collection)
+    garbage_collection_thread.start()
+
     APP.run(host='0.0.0.0', port=APP_PORT)
