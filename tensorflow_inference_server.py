@@ -128,7 +128,7 @@ def get_status(session_id):
                 flask.url_for(
                     'download_result', _external=True,
                     filename=(
-                        current_session['annotated_png_url'])))
+                        current_session['annotated_png_filename'])))
             LOGGER.debug('rewriting url %s', current_session)
         return session_map_to_response(current_session)
 
