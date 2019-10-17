@@ -330,6 +330,7 @@ def garbage_collection():
             current_time = time.time()
             LOGGER.debug('garbage collecting, current time %s', current_time)
             with SESSION_MANAGER_LOCK:
+                session_remove_list = []
                 for session_id, access_map in \
                         LAST_ACCESSED_SESSION_MAP.items():
                     if (current_time > access_map['last_time'] +
@@ -339,8 +340,10 @@ def garbage_collection():
                                 'removing %s after %.2f seconds', file_path,
                                 current_time - access_map['last_time'])
                             os.remove(file_path)
-                        del LAST_ACCESSED_SESSION_MAP[session_id]
-                        del SESSION_MANAGER_MAP[session_id]
+                        session_remove_list.append(session_id)
+                for session_id in session_remove_list:
+                    del LAST_ACCESSED_SESSION_MAP[session_id]
+                    del SESSION_MANAGER_MAP[session_id]
         except Exception:
             LOGGER.exception('exception in `garbage_collection')
 
