@@ -62,7 +62,8 @@ def detect_dam_init():
     print(session_id)
     with SESSION_MANAGER_LOCK:
         SESSION_MANAGER_MAP[session_id] = {
-            'status': 'waiting for upload'
+            'status': 'waiting for upload',
+            'http_status_code': 200,
         }
     return {
         'upload_url': flask.url_for(
@@ -86,9 +87,10 @@ def detect_dam(session_id):
         SESSION_MANAGER_MAP[session_id] = {
             'status': 'processing',
             'status_url': flask.url_for(
-                'get_status', _external=True, session_id=session_id)
+                'get_status', _external=True, session_id=session_id),
+            'http_status_code': 200,
         }
-        return SESSION_MANAGER_MAP[session_id]
+        return session_map_to_response(SESSION_MANAGER_MAP[session_id])
 
 
 @APP.route('/api/v1/get_status/<string:session_id>', methods=['GET'])
@@ -97,7 +99,7 @@ def get_status(session_id):
     with SESSION_MANAGER_LOCK:
         if session_id not in SESSION_MANAGER_MAP:
             return ('%s not a valid session', 400)
-        return SESSION_MANAGER_MAP[session_id]
+        return session_map_to_response(SESSION_MANAGER_MAP[session_id])
 
 
 @APP.route('/api/v1/download/<string:filename>', methods=['POST'])
@@ -225,6 +227,12 @@ def load_model(path_to_model):
     return detection_graph
 
 
+def session_map_to_response(session_map):
+    """Return HTTP response code if it's in there."""
+    if 'http_status_code' in session_map:
+        return (session_map, session_map['http_status_code'])
+
+
 def inference_worker(tf_graph_path, work_queue):
     """Process images as they are sent to the server.
 
@@ -256,7 +264,8 @@ def inference_worker(tf_graph_path, work_queue):
             except Exception as e:
                 with SESSION_MANAGER_LOCK:
                     SESSION_MANAGER_MAP[session_id] = {
-                        'status': str(e)
+                        'status': str(e),
+                        'http_status_code': 500,
                     }
 
             with SESSION_MANAGER_LOCK:
@@ -266,7 +275,9 @@ def inference_worker(tf_graph_path, work_queue):
                     'annotated_png_url': flask.url_for(
                         'download_result', _external=True,
                         filename=os.path.basename(annotated_path)),
-                    'bounding_box_list': bb_list}
+                    'bounding_box_list': bb_list,
+                    'http_status_code': 200,
+                }
         except Exception as e:
             LOGGER.exception('exception in inference worker')
 
