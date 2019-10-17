@@ -206,6 +206,7 @@ def do_detection(tf_graph, threshold_level, png_path):
         ANNOTATED_IMAGE_DIR,
         '%s_annotated%s' % os.path.splitext(png_path))
     image.save(annotated_path)
+    LOGGER.debug('saved to %s', annotated_path)
     return annotated_path, bb_list
 
 
@@ -279,8 +280,7 @@ def inference_worker(tf_graph_path, work_queue):
                 SESSION_MANAGER_MAP[session_id] = {
                     'status': 'complete',
                     'annotated_png_url_base': (
-                        '/api/v1/download/%s' % os.path.basename(
-                            annotated_path)),
+                        '/api/v1/download/%s' % annotated_path),
                     'bounding_box_list': bb_list,
                     'http_status_code': 200,
                 }
