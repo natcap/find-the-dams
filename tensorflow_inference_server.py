@@ -38,7 +38,7 @@ LOGGER = logging.getLogger(__name__)
 APP = Flask(__name__, static_url_path='', static_folder='')
 APP_ROOT = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_FOLDER = os.path.join(APP_ROOT, 'od_workspace')
-THRESHOLD_LEVEL = 0.08
+THRESHOLD_LEVEL = 0.0001
 TF_GRAPH_PATH = sys.argv[1]
 
 
