@@ -36,8 +36,9 @@ print(r.json())
 status_url = r.json()['status_url']
 
 while True:
-    r = requests.get(status_url).json()
+    r = requests.get(status_url)
     print(r)
+    r = r.json()
     if r['status'] != 'complete':
         time.sleep(3)
     else:
