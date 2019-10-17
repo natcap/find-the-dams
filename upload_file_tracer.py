@@ -52,10 +52,9 @@ while True:
 
 if okay:
     print(r['bounding_box_list'])
-    local_filename = r['annotated_png_url_base'].split('/')[-1]
-    annotated_png_url = host_and_port+r['annotated_png_url_base']
-    print(annotated_png_url)
-    with requests.get(annotated_png_url, stream=True) as r:
-        with open(local_filename, 'wb') as f:
+    download_url = r['annotated_png_url']
+
+    with requests.get(download_url, stream=True) as r:
+        with open(os.path.join(download_url), 'wb') as f:
             shutil.copyfileobj(r.raw, f)
 print('done!')
