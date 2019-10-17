@@ -273,7 +273,7 @@ def inference_worker(tf_graph_path, work_queue):
 
             with SESSION_MANAGER_LOCK:
                 annotated_path, bb_list = payload
-                with APP:
+                with APP.app_context():
                     SESSION_MANAGER_MAP[session_id] = {
                         'status': 'complete',
                         'annotated_path': annotated_path,
