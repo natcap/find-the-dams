@@ -45,7 +45,7 @@ while True:
         else:
             break
     else:
-        print('error: %s', r.json())
+        print('error: %s', r.json()['status'])
         break
 
 if r.ok:
