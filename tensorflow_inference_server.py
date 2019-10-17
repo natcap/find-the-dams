@@ -192,7 +192,6 @@ def do_detection(tf_graph, threshold_level, png_path):
         LOGGER.debug('*** found a bounding box')
 
     bb_list = []
-    image = PIL.Image.fromarray(image_array).convert("RGB")
     image_draw = PIL.ImageDraw.Draw(image)
     for box in bb_box_list:
         image_draw.rectangle(coords, outline='RED')
