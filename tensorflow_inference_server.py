@@ -19,6 +19,12 @@ import tensorflow as tf
 
 WORKSPACE_DIR = 'workspace_tf_server'
 ANNOTATED_IMAGE_DIR = os.path.join(WORKSPACE_DIR, 'annotated_images')
+for dirname in [WORKSPACE_DIR, ANNOTATED_IMAGE_DIR]:
+    try:
+        os.makedirs(dirname)
+    except OSError:
+        pass
+
 logging.basicConfig(
     level=logging.DEBUG,
     format=(
