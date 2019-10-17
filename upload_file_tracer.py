@@ -46,6 +46,7 @@ while True:
             break
     else:
         print('error: %s', r.json())
+        break
 
 if r.ok:
     print(r['bounding_box_list'])
