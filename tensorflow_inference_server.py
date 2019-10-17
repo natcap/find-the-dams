@@ -265,7 +265,7 @@ def inference_worker(tf_graph_path, work_queue):
             except Exception as e:
                 with SESSION_MANAGER_LOCK:
                     SESSION_MANAGER_MAP[session_id] = {
-                        'status': traceback.format_exec(),
+                        'status': traceback.format_exc(),
                         'http_status_code': 500,
                     }
 
