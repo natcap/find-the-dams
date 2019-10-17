@@ -37,15 +37,20 @@ status_url = r.json()['status_url']
 
 while True:
     r = requests.get(status_url)
-    print(r)
-    r = r.json()
-    if r['status'] != 'complete':
-        time.sleep(3)
+    if r.ok:
+        r = r.json()
+        print(r)
+        if r['status'] != 'complete':
+            time.sleep(3)
+        else:
+            break
     else:
-        break
-print(r['bounding_box_list'])
-local_filename = r['annotated_png_url'].split('/')[-1]
-with requests.get(r['annotated_png_url'], stream=True) as r:
-    with open(local_filename, 'wb') as f:
-        shutil.copyfileobj(r.raw, f)
+        print('error: %s', r.json())
+
+if r.ok:
+    print(r['bounding_box_list'])
+    local_filename = r['annotated_png_url'].split('/')[-1]
+    with requests.get(r['annotated_png_url'], stream=True) as r:
+        with open(local_filename, 'wb') as f:
+            shutil.copyfileobj(r.raw, f)
 print('done!')
