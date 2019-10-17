@@ -126,7 +126,7 @@ def do_detection(tf_graph, threshold_level, png_path):
     """
     image = PIL.Image.open(png_path).convert("RGB")
     image_array = numpy.array(image.getdata())
-    LOGGER.debug('detection on %s (%s)', png_path, str(image.shape))
+    LOGGER.debug('detection on %s (%s)', png_path, str(image.size))
     with tf_graph.as_default():
         with tf.Session(graph=tf_graph) as sess:
             image_array_expanded = numpy.expand_dims(image_array, axis=0)
@@ -158,10 +158,10 @@ def do_detection(tf_graph, threshold_level, png_path):
             # fasterRCNN_08-26-withnotadams_md5_83f58894e34e1e785fcaa2dbc1d3ec7a.pb
             continue
         coords = (
-            (box[1] * image.shape[1],
-             box[0] * image.shape[0]),
-            (box[3] * image.shape[1],
-             box[2] * image.shape[0]))
+            (box[1] * image.size[0],
+             box[0] * image.size[1]),
+            (box[3] * image.size[0],
+             box[2] * image.size[1]))
         local_box = shapely.geometry.box(
             min(coords[0][0], coords[1][0]),
             min(coords[0][1], coords[1][1]),
@@ -262,12 +262,13 @@ def inference_worker(tf_graph_path, work_queue):
                 pass
             try:
                 payload = do_detection(tf_graph, THRESHOLD_LEVEL, png_path)
-            except Exception as e:
+            except Exception:
                 with SESSION_MANAGER_LOCK:
                     SESSION_MANAGER_MAP[session_id] = {
                         'status': traceback.format_exc(),
                         'http_status_code': 500,
                     }
+                continue
 
             with SESSION_MANAGER_LOCK:
                 annotated_path, bb_list = payload
@@ -279,7 +280,7 @@ def inference_worker(tf_graph_path, work_queue):
                     'bounding_box_list': bb_list,
                     'http_status_code': 200,
                 }
-        except Exception as e:
+        except Exception:
             LOGGER.exception('exception in inference worker')
 
 
