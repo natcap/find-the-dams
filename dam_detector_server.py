@@ -54,40 +54,41 @@ These are the questions we can answer during processing:
     * what dams weren't detected? (i.e. a quad was processed with a dam in it
       that wasn't found)
 """
-import traceback
 import argparse
-import multiprocessing
-import uuid
-import shutil
-import threading
+import ast
 import datetime
 import json
-import ast
-import urllib
-import sqlite3
-import os
-import sys
 import logging
+import multiprocessing
+import os
+import shutil
+import sqlite3
+import sys
+import threading
+import time
+import traceback
+import urllib
+import uuid
 
+from flask import Flask
+from osgeo import gdal
+from osgeo import ogr
+from osgeo import osr
 import ecoshard
+import flask
 import numpy
+import PIL
+import PIL.ImageDraw
 import pygeoprocessing
 import requests
 import retrying
-import taskgraph
-from osgeo import gdal
-from osgeo import osr
-from osgeo import ogr
 import shapely.geometry
 import shapely.ops
 import shapely.prepared
 import shapely.strtree
 import shapely.wkb
-from flask import Flask
-import flask
+import taskgraph
 import tensorflow as tf
-import PIL
-import PIL.ImageDraw
 
 
 logging.basicConfig(
@@ -117,6 +118,7 @@ ACTIVE_MOSAIC_JSON_PATH = os.path.join(WORKSPACE_DIR, 'active_mosaic.json')
 REQUEST_TIMEOUT = 5
 FRAGMENT_SIZE = (419, 419)  # dims to fragment a Planet quad
 THRESHOLD_LEVEL = 0.08
+DETECTOR_POLL_TIME = 3  # seconds to wait between detector complete checks
 DATABASE_STATUS_STR = None
 GLOBAL_LOCK = None
 WORKING_GRID_ID_STATUS_MAP = None
@@ -450,7 +452,7 @@ def initalize_spatial_search_units(database_path, complete_token_path):
     for lat in range(-56, 66):
         LOGGER.debug('processing lat %d', lat)
         for lng in range(-180, 180):
-            grid_geom = shapely.geometry.box(lng, lat, lng+1, lat+1)
+            grid_geom = shapely.geometry.box(lng, lat, lng + 1, lat + 1)
             name_list = []
             for intersect_geom in str_tree.query(grid_geom):
                 if intersect_geom.intersects(grid_geom):
@@ -458,7 +460,7 @@ def initalize_spatial_search_units(database_path, complete_token_path):
             if name_list:
                 spatial_analysis_unit_list.append(
                     (current_grid_id, 'unscheduled',
-                     ','.join(name_list), lat, lng, lat+1, lng+1))
+                     ','.join(name_list), lat, lng, lat + 1, lng + 1))
                 current_grid_id += 1
 
     connection = sqlite3.connect(database_path)
@@ -544,7 +546,7 @@ def schedule_worker(download_work_pipe, readonly_database_uri):
             LOGGER.debug('scheduling grid %s', grid_id)
             download_work_pipe.send(grid_id)
             # wait for acknowledgment
-            _ = download_work_pipe.recv()
+            _ = download_work_pipe.recv()  # noqa: F841
             with GLOBAL_LOCK:
                 WORKING_GRID_ID_STATUS_MAP[grid_id] = 'scheduled'
     except Exception:
@@ -722,7 +724,8 @@ def inference_worker(
         with GLOBAL_LOCK:
             connection = sqlite3.connect(database_path)
             cursor = connection.cursor()
-            cursor.execute('SELECT max(cast(dam_id as integer)) from identified_dams')
+            cursor.execute(
+                'SELECT max(cast(dam_id as integer)) from identified_dams')
             current_dam_id = int(cursor.fetchone()[0])
             cursor.close()
             connection.commit()
@@ -842,16 +845,16 @@ def inference_worker(
         LOGGER.exception("Exception in inference_worker")
 
 
-def do_detection(tf_graph, threshold_level, image_path,
+def do_detection(tf_graph, threshold_level, rgb_raster_path,
                  dam_image_workspace, grid_tag):
     """Detect whatever the graph is supposed to detect on a single image.
 
     Parameters:
         tf_graph (tensorflow Graph): a loaded graph that can accept
-            images of the size in `image_path`.
+            images of the size in `rgb_raster_path`.
         threshold_level (float): the confidence threshold level to cut off
             classification
-        image_path (str): path to an image that `tf_graph` can parse.
+        rgb_raster_path (str): path to an RGB geotiff.
         dam_image_workspace (str): path to a directory that can save images.
         grid_tag (str): tag to attach to image file names
 
@@ -859,99 +862,71 @@ def do_detection(tf_graph, threshold_level, image_path,
         None.
 
     """
-    base_array = gdal.Open(image_path).ReadAsArray().astype(numpy.uint8)
-    image_array = numpy.dstack(
-        [base_array[0, :, :],
-         base_array[1, :, :],
-         base_array[2, :, :]])
-    LOGGER.debug('detection on %s', image_path)
-    with tf_graph.as_default():
-        with tf.Session(graph=tf_graph) as sess:
-            image_array_expanded = numpy.expand_dims(image_array, axis=0)
-            image_tensor = tf_graph.get_tensor_by_name('image_tensor:0')
-            box = tf_graph.get_tensor_by_name('detection_boxes:0')
-            score = tf_graph.get_tensor_by_name('detection_scores:0')
-            clss = tf_graph.get_tensor_by_name('detection_classes:0')
-            num_detections = tf_graph.get_tensor_by_name('num_detections:0')
+    png_driver = gdal.GetDriverByName('PNG')
+    base_raster = gdal.OpenEx(rgb_raster_path, gdal.OF_RASTER)
+    png_path = '%s.png' % os.path.splitext(rgb_raster_path)[0]
+    png_driver.CreateCopy(png_path, base_raster)
+    base_raster = None
+    png_driver = None
 
-            (box_list, score_list, _, _) = sess.run(
-                [box, score, clss, num_detections],
-                feed_dict={image_tensor: image_array_expanded})
+    image = PIL.Image.open(png_path).convert("RGB")
+    height, width = image.size
+    image_array = numpy.array(image.getdata()).reshape((height, width, 3))
+    print(image_array.shape)
 
-    # draw a bounding box
-    local_box_list = []
-    for box, score in reversed(sorted(
-            zip(box_list[0], score_list[0]), key=lambda x: x[1])):
-        if score < threshold_level:
+    host_and_port = "http://%s" % sys.argv[1]
+    detect_dam_url = "%s/api/v1/detect_dam" % host_and_port
+
+    print('uploading %s to %s' % (rgb_raster_path, detect_dam_url))
+
+    initial_response = requests.post(detect_dam_url)
+    LOGGER.debug('initial_response: %s', initial_response)
+    upload_url = initial_response.json()['upload_url']
+    upload_response = requests.put(
+        upload_url, files={'file': open(png_path, 'rb')})
+    LOGGER.debug('upload_response: %s', upload_response)
+    status_url = upload_response.json()['status_url']
+
+    while True:
+        # keep polling status until error or complete
+        status_response = requests.get(status_url)
+        status_map = status_response.json()
+        if status_response.okay:
+            LOGGER.debug('status: %s', status_map)
+            if status_map['status'] != 'complete':
+                time.sleep(DETECTOR_POLL_TIME)
+            else:
+                break
+        else:
+            LOGGER.error('error: %s', status_map['status'])
             break
 
-        # make sure in bounds
-        if ((box[1] < .1 and box[3] < .1) or
-                (box[0] < .1 and box[2] < .1) or
-                (box[1] > .9 and box[3] > .9) or
-                (box[0] > .9 and box[2] > .9) or
-                (abs(box[0] - box[2]) >= .9) or
-                (abs(box[1] - box[3]) >= .9)):
-            # this is an edge box -- probably not a dam and is an artifact of
-            # fasterRCNN_08-26-withnotadams_md5_83f58894e34e1e785fcaa2dbc1d3ec7a.pb
-            continue
-        coords = (
-            (box[1] * image_array.shape[1],
-             box[0] * image_array.shape[0]),
-            (box[3] * image_array.shape[1],
-             box[2] * image_array.shape[0]))
-        local_box = shapely.geometry.box(
-            min(coords[0][0], coords[1][0]),
-            min(coords[0][1], coords[1][1]),
-            max(coords[0][0], coords[1][0]),
-            max(coords[0][1], coords[1][1]))
-        local_box_list.append(local_box)
-    LOGGER.debug('found %d bounding boxes', len(local_box_list))
+    if status_response.okay:
+        bb_box_list = status_map['bounding_box_list']
+        if not bb_box_list:
+            return None
+        LOGGER.debug('bounding boxes: %s', bb_box_list)
+        download_url = status_map['annotated_png_url']
+        png_image_path = os.path.join(
+            dam_image_workspace, '%s_%s.png' % (
+                grid_tag, os.path.basename(
+                    os.path.splitext(rgb_raster_path)[0])))
+        with requests.get(download_url, stream=True) as r:
+            with open(png_image_path, 'wb') as f:
+                shutil.copyfileobj(r.raw, f)
 
-    # this unions any overlapping-bounding boxes together
-    bb_box_list = []
-    while local_box_list:
-        local_box = local_box_list.pop()
-        tmp_box_list = []
-        n_intersections = 0
-        while local_box_list:
-            test_box = local_box_list.pop()
-            if local_box.intersects(test_box):
-                local_box = local_box.union(test_box)
-                n_intersections += 1
-            else:
-                tmp_box_list.append(test_box)
-        local_box_list = tmp_box_list
-
-        # make sure we intersect at least one thing
-        # if n_intersections < 1:
-        #     continue
-        bb_box_list.append(local_box)
-
-    if bb_box_list:
-        LOGGER.debug('******** found a bounding box')
-        lat_lng_list = []
-        image = PIL.Image.fromarray(image_array).convert("RGB")
-        image_draw = PIL.ImageDraw.Draw(image)
         geotransform = pygeoprocessing.get_raster_info(
-            image_path)['geotransform']
+            rgb_raster_path)['geotransform']
+        lat_lng_list = []
         for box in bb_box_list:
-            image_draw.rectangle(coords, outline='RED')
             ul_corner = gdal.ApplyGeoTransform(
                 geotransform, float(box.bounds[0]), float(box.bounds[1]))
             lr_corner = gdal.ApplyGeoTransform(
                 geotransform, float(box.bounds[2]), float(box.bounds[3]))
             lat_lng_list.append((ul_corner, lr_corner))
-        del image_draw
-        png_image_path = os.path.join(
-            dam_image_workspace, '%s_%s.png' % (grid_tag, os.path.basename(
-                os.path.splitext(image_path)[0])))
-        LOGGER.debug('going to save %s', png_image_path)
-        image.save(png_image_path)
-        LOGGER.debug('saved %s', png_image_path)
         return png_image_path, lat_lng_list
-    else:
-        return None
+
+    return None
 
 
 def load_model(path_to_model):
@@ -1126,7 +1101,7 @@ if __name__ == '__main__':
             str(datetime.datetime.now()).replace(
                 ' ', '_').replace(':', '_').replace('.', '_'))
         db_backup_path = '%s_%s%s' % (
-                db_base_path, timestamp_string, db_extension)
+            db_base_path, timestamp_string, db_extension)
         LOGGER.warn('moving old database to %s' % db_backup_path)
         shutil.copyfile(
             DATABASE_PATH, db_backup_path)
