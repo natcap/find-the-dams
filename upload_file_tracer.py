@@ -53,8 +53,8 @@ while True:
 if okay:
     print(r['bounding_box_list'])
     download_url = r['annotated_png_url']
-
+    local_path = os.path.basename(download_url)
     with requests.get(download_url, stream=True) as r:
-        with open(os.path.join(download_url), 'wb') as f:
+        with open(local_path, 'wb') as f:
             shutil.copyfileobj(r.raw, f)
 print('done!')
