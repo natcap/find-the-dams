@@ -256,7 +256,7 @@ def inference_worker(tf_graph_path, work_queue):
             except Exception as e:
                 with SESSION_MANAGER_LOCK:
                     SESSION_MANAGER_MAP[session_id] = {
-                        'status': str(e.exception)
+                        'status': str(e)
                     }
 
             with SESSION_MANAGER_LOCK:
@@ -267,7 +267,7 @@ def inference_worker(tf_graph_path, work_queue):
                         'download_result', _external=True,
                         filename=os.path.basename(annotated_path)),
                     'bounding_box_list': bb_list}
-        except Exception:
+        except Exception as e:
             LOGGER.exception('exception in inference worker')
 
 
