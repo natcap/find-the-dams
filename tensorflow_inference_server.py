@@ -5,6 +5,7 @@ import queue
 import shutil
 import sys
 import threading
+import time
 import traceback
 import uuid
 
@@ -63,6 +64,14 @@ APP_PORT = int(sys.argv[2])
 #  * '<traceback>' with 500 error
 SESSION_MANAGER_MAP = {}
 
+# this is used to clear out unused sessions, it will have a
+# (last accessed timestamp, files created list) tuple that a thread monitors
+# and cleans periodically.
+LAST_ACCESSED_SESSION_MAP = {}
+# if session not accessed within this amount of time files in
+# LAST_ACCESSED_SESSION_MAP will be removed
+CLEANUP_WAIT_TIME = 60.0
+
 
 @APP.route('/api/v1/detect_dam', methods=['POST'])
 def detect_dam_init():
@@ -93,6 +102,8 @@ def detect_dam(session_id):
     flask.request.files['file'].save(target_path)
     WORK_QUEUE.put((session_id, target_path))
     with SESSION_MANAGER_LOCK:
+        LAST_ACCESSED_SESSION_MAP[session_id] = (
+            time.time(), )
         SESSION_MANAGER_MAP[session_id] = {
             'status': 'processing',
             'status_url': flask.url_for(
@@ -104,16 +115,19 @@ def detect_dam(session_id):
 
 @APP.route('/api/v1/get_status/<string:session_id>', methods=['GET'])
 def get_status(session_id):
-    """Returns status of processing."""
+    """Return status of processing."""
     with SESSION_MANAGER_LOCK:
-        if 'annotated_png_filename' in SESSION_MANAGER_MAP:
-            SESSION_MANAGER_MAP[session_id]['annotated_png_url'] = (
+        if session_id not in SESSION_MANAGER_MAP:
+            return "%s not found" % session_id, 400
+        current_session = SESSION_MANAGER_MAP[session_id]
+        if 'annotated_png_filename' in current_session:
+            current_session['annotated_png_url'] = (
                 flask.url_for(
                     'download_result', _external=True,
                     filename=(
-                        SESSION_MANAGER_MAP[session_id]['annotated_png_url'])))
-            LOGGER.debug('rewriting url %s', SESSION_MANAGER_MAP[session_id])
-        return session_map_to_response(SESSION_MANAGER_MAP[session_id])
+                        current_session['annotated_png_url'])))
+            LOGGER.debug('rewriting url %s', current_session)
+        return session_map_to_response(current_session)
 
 
 @APP.route('/api/v1/download/<string:filename>', methods=['GET'])
