@@ -58,8 +58,9 @@ APP_PORT = int(sys.argv[2])
 # can be
 #  * 'waiting for upload'
 #  * 'processing'
-#  * 'error: <msg>'
-#  * <url to download file>
+#  * 'complete'
+#       * if complete then has 'annotated_png_url_base' to turn into url
+#  * '<traceback>' with 500 error
 SESSION_MANAGER_MAP = {}
 
 
@@ -105,8 +106,12 @@ def detect_dam(session_id):
 def get_status(session_id):
     """Returns status of processing."""
     with SESSION_MANAGER_LOCK:
-        if session_id not in SESSION_MANAGER_MAP:
-            return ('%s not a valid session', 400)
+        if 'annotated_png_filename' in SESSION_MANAGER_MAP:
+            SESSION_MANAGER_MAP[session_id]['annotated_png_url'] = (
+                flask.url_for(
+                    'download_result', _external=True,
+                    filename=(
+                        SESSION_MANAGER_MAP[session_id]['annotated_png_url'])))
         return session_map_to_response(SESSION_MANAGER_MAP[session_id])
 
 
@@ -286,9 +291,8 @@ def inference_worker(tf_graph_path, work_queue):
                 annotated_path, bb_list = payload
                 SESSION_MANAGER_MAP[session_id] = {
                     'status': 'complete',
-                    'annotated_png_url_base': (
-                        '/api/v1/download/%s' % os.path.basename(
-                            annotated_path)),
+                    'annotated_png_filename': os.path.basename(
+                        annotated_path),
                     'bounding_box_list': bb_list,
                     'http_status_code': 200,
                 }
