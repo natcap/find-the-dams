@@ -12,6 +12,7 @@ from flask import Flask
 import flask
 import numpy
 import PIL
+import PIL.ImageDraw
 import shapely.geometry
 import tensorflow as tf
 
