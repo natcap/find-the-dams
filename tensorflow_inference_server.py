@@ -243,29 +243,32 @@ def inference_worker(tf_graph_path, work_queue):
     tf_graph = load_model(TF_GRAPH_PATH)
 
     while True:
-        session_id, png_path = work_queue.get()
-        LOGGER.debug('processing %s', png_path)
-        dam_image_workspace = os.path.join(WORKSPACE_DIR, session_id)
         try:
-            os.makedirs(dam_image_workspace)
-        except OSError:
-            pass
-        try:
-            payload = do_detection(tf_graph, THRESHOLD_LEVEL, png_path)
-        except Exception as e:
-            with SESSION_MANAGER_LOCK:
-                SESSION_MANAGER_MAP[session_id] = {
-                    'status': str(e.msg)
-                }
+            session_id, png_path = work_queue.get()
+            LOGGER.debug('processing %s', png_path)
+            dam_image_workspace = os.path.join(WORKSPACE_DIR, session_id)
+            try:
+                os.makedirs(dam_image_workspace)
+            except OSError:
+                pass
+            try:
+                payload = do_detection(tf_graph, THRESHOLD_LEVEL, png_path)
+            except Exception as e:
+                with SESSION_MANAGER_LOCK:
+                    SESSION_MANAGER_MAP[session_id] = {
+                        'status': str(e.exception)
+                    }
 
-        with SESSION_MANAGER_LOCK:
-            annotated_path, bb_list = payload
-            SESSION_MANAGER_MAP[session_id] = {
-                'status': 'complete',
-                'annotated_png_url': flask.url_for(
-                    'download_result', _external=True,
-                    filename=os.path.basename(annotated_path)),
-                'bounding_box_list': bb_list}
+            with SESSION_MANAGER_LOCK:
+                annotated_path, bb_list = payload
+                SESSION_MANAGER_MAP[session_id] = {
+                    'status': 'complete',
+                    'annotated_png_url': flask.url_for(
+                        'download_result', _external=True,
+                        filename=os.path.basename(annotated_path)),
+                    'bounding_box_list': bb_list}
+        except Exception:
+            LOGGER.exception('exception in inference worker')
 
 
 if __name__ == '__main__':
