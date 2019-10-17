@@ -125,7 +125,8 @@ def do_detection(tf_graph, threshold_level, png_path):
 
     """
     image = PIL.Image.open(png_path).convert("RGB")
-    image_array = numpy.array(image.getdata())
+    image_array = numpy.array(image.getdata()).reshape(
+        image.size[1], image.size[0], 3)
     LOGGER.debug('detection on %s (%s)', png_path, str(image.size))
     with tf_graph.as_default():
         with tf.Session(graph=tf_graph) as sess:
@@ -158,10 +159,10 @@ def do_detection(tf_graph, threshold_level, png_path):
             # fasterRCNN_08-26-withnotadams_md5_83f58894e34e1e785fcaa2dbc1d3ec7a.pb
             continue
         coords = (
-            (box[1] * image.size[0],
-             box[0] * image.size[1]),
-            (box[3] * image.size[0],
-             box[2] * image.size[1]))
+            (box[1] * image.size[1],
+             box[0] * image.size[0]),
+            (box[3] * image.size[1],
+             box[2] * image.size[0]))
         local_box = shapely.geometry.box(
             min(coords[0][0], coords[1][0]),
             min(coords[0][1], coords[1][1]),
