@@ -54,6 +54,7 @@ These are the questions we can answer during processing:
     * what dams weren't detected? (i.e. a quad was processed with a dam in it
       that wasn't found)
 """
+import traceback
 import argparse
 import multiprocessing
 import uuid
@@ -246,9 +247,9 @@ def processing_status():
         cursor.close()
         connection.commit()
         return json.dumps(payload)
-    except Exception as e:
+    except Exception:
         LOGGER.exception('encountered exception')
-        return str(e)
+        return traceback.format_exc()
 
 
 def get_bounding_box_quads(

@@ -1,18 +1,19 @@
 """RESTful server to process an image."""
-import uuid
-import shutil
-import threading
-import os
 import logging
-import sys
+import os
 import queue
+import shutil
+import sys
+import threading
+import traceback
+import uuid
 
-import shapely.geometry
-import PIL
-import flask
 from flask import Flask
-import tensorflow as tf
+import flask
 import numpy
+import PIL
+import shapely.geometry
+import tensorflow as tf
 
 
 WORKSPACE_DIR = 'workspace_tf_server'
@@ -264,7 +265,7 @@ def inference_worker(tf_graph_path, work_queue):
             except Exception as e:
                 with SESSION_MANAGER_LOCK:
                     SESSION_MANAGER_MAP[session_id] = {
-                        'status': str(e),
+                        'status': traceback.format_exec(),
                         'http_status_code': 500,
                     }
 
