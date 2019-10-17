@@ -1,5 +1,5 @@
-# natcap/dam-inference-server-gpu:0.0.1
-FROM tensorflow/tensorflow:1.12.0-gpu-py3
+# natcap/dam-inference-server-cpu:0.0.1
+FROM tensorflow/tensorflow:1.12.0-py3
 
 RUN apt-get update \
 && apt-get install -y \
