@@ -38,7 +38,8 @@ status_url = r.json()['status_url']
 
 while True:
     r = requests.get(status_url)
-    if r.ok:
+    okay = r.ok
+    if okay:
         r = r.json()
         print(r)
         if r['status'] != 'complete':
@@ -49,7 +50,7 @@ while True:
         print('error: %s', r.json()['status'])
         break
 
-if r.ok:
+if okay:
     print(r['bounding_box_list'])
     local_filename = r['annotated_png_base'].split('/')[-1]
     annotated_png_url = os.path.join(target_url, r['annotated_png_url_base'])

@@ -202,7 +202,7 @@ def do_detection(tf_graph, threshold_level, png_path):
     del image_draw
     annotated_path = os.path.join(
         ANNOTATED_IMAGE_DIR,
-        '%s_annotated.%s' % os.path.splitext(png_path))
+        '%s_annotated%s' % os.path.splitext(png_path))
     image.save(annotated_path)
     return annotated_path, bb_list
 
@@ -233,6 +233,7 @@ def session_map_to_response(session_map):
     """Return HTTP response code if it's in there."""
     if 'http_status_code' in session_map:
         return (session_map, session_map['http_status_code'])
+    return session_map
 
 
 def inference_worker(tf_graph_path, work_queue):
