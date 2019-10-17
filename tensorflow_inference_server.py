@@ -334,7 +334,7 @@ def garbage_collection():
                         LAST_ACCESSED_SESSION_MAP.items():
                     if (current_time > access_map['last_time'] +
                             CLEANUP_WAIT_TIME):
-                        for file_path in access_map['file_path']:
+                        for file_path in access_map['file_list']:
                             LOGGER.debug(
                                 'removing %s after %.2f seconds', file_path,
                                 current_time - access_map['last_time'])
