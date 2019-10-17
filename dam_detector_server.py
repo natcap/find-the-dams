@@ -61,6 +61,7 @@ import json
 import logging
 import multiprocessing
 import os
+import queue
 import shutil
 import sqlite3
 import sys
@@ -74,7 +75,6 @@ from flask import Flask
 from osgeo import gdal
 from osgeo import ogr
 from osgeo import osr
-import ecoshard
 import flask
 import numpy
 import PIL
@@ -102,9 +102,6 @@ logging.getLogger('taskgraph').setLevel(logging.DEBUG)
 DAM_BOUNDING_BOX_URL = (
     'https://storage.googleapis.com/natcap-natgeo-dam-ecoshards/'
     'dams_database_md5_7acdf64cd03791126a61478e121c4772.db')
-INFERENCE_MODEL_URL = (
-    'https://storage.googleapis.com/natcap-natgeo-dam-ecoshards/'
-    'fasterRCNN_08-26-withnotadams_md5_83f58894e34e1e785fcaa2dbc1d3ec7a.pb')
 WORLD_BORDERS_VECTOR_PATH = 'world_borders.gpkg'
 LOGGER = logging.getLogger(__name__)
 
@@ -700,7 +697,7 @@ def download_url_to_file(url, target_file_path):
 
 
 def inference_worker(
-        inference_pipe, database_path, worker_id, tf_model_path):
+        inference_pipe, inference_worker_ip_queue, database_path, worker_id):
     """Take large quads and search for dams.
 
     Parameters:
@@ -708,12 +705,14 @@ def inference_worker(
             ('fragment_id', 'quad_raster_path') tuples where
             'quad_raster_path' is a path to a geotiff that can be searched
             for dam bounding boxes.
+        inference_worker_ip_queue (queue.Queue): contains a queue of
+            host/port strings that can be used as the base to connect to
+            the API server. This queue is used to manage multiple servers
+            and if they are currently being used/removed/added.
         database_path (str): URI to writeable version of database to store
             found dams.
         worker_id (int): a unique ID to identify which worker so we can
             uniquely identify each dam.
-        tf_model_path (str): path to a frozen TensorFlow graph that will be
-            loaded to do inference.
 
     Returns:
         None.
@@ -730,7 +729,6 @@ def inference_worker(
             cursor.close()
             connection.commit()
 
-        tf_graph = load_model(tf_model_path)
         wgs84_srs = osr.SpatialReference()
         wgs84_srs.ImportFromEPSG(4326)
         while True:
@@ -774,9 +772,8 @@ def inference_worker(
                     # image file somewhere and also make an entry in the
                     # database
                     detection_result = do_detection(
-                        tf_graph, THRESHOLD_LEVEL, clipped_raster_path,
-                        DAM_IMAGE_WORKSPACE, '%s_%s' % (
-                            worker_id, quad_id))
+                        inference_worker_ip_queue, clipped_raster_path,
+                        DAM_IMAGE_WORKSPACE, '%s_%s' % (worker_id, quad_id))
                     if detection_result:
                         dam_list = []
                         image_bb_path, coord_list = detection_result
@@ -845,11 +842,16 @@ def inference_worker(
         LOGGER.exception("Exception in inference_worker")
 
 
-def do_detection(tf_graph, threshold_level, rgb_raster_path,
-                 dam_image_workspace, grid_tag):
+def do_detection(
+        inference_worker_ip_queue, rgb_raster_path, dam_image_workspace,
+        grid_tag):
     """Detect whatever the graph is supposed to detect on a single image.
 
     Parameters:
+        inference_worker_ip_queue (queue.Queue): contains a queue of
+            host/port strings that can be used as the base to connect to
+            the API server. This queue is used to manage multiple servers
+            and if they are currently being used/removed/added.
         tf_graph (tensorflow Graph): a loaded graph that can accept
             images of the size in `rgb_raster_path`.
         threshold_level (float): the confidence threshold level to cut off
@@ -874,59 +876,64 @@ def do_detection(tf_graph, threshold_level, rgb_raster_path,
     image_array = numpy.array(image.getdata()).reshape((height, width, 3))
     print(image_array.shape)
 
-    host_and_port = "http://%s" % sys.argv[1]
-    detect_dam_url = "%s/api/v1/detect_dam" % host_and_port
+    host_and_port = inference_worker_ip_queue.get()
+    LOGGER.debug('connecting to %s', host_and_port)
+    try:
+        detect_dam_url = "%s/api/v1/detect_dam" % host_and_port
 
-    print('uploading %s to %s' % (rgb_raster_path, detect_dam_url))
+        print('uploading %s to %s' % (rgb_raster_path, detect_dam_url))
 
-    initial_response = requests.post(detect_dam_url)
-    LOGGER.debug('initial_response: %s', initial_response)
-    upload_url = initial_response.json()['upload_url']
-    upload_response = requests.put(
-        upload_url, files={'file': open(png_path, 'rb')})
-    LOGGER.debug('upload_response: %s', upload_response)
-    status_url = upload_response.json()['status_url']
+        initial_response = requests.post(detect_dam_url)
+        LOGGER.debug('initial_response: %s', initial_response)
+        upload_url = initial_response.json()['upload_url']
+        upload_response = requests.put(
+            upload_url, files={'file': open(png_path, 'rb')})
+        LOGGER.debug('upload_response: %s', upload_response)
+        status_url = upload_response.json()['status_url']
 
-    while True:
-        # keep polling status until error or complete
-        status_response = requests.get(status_url)
-        status_map = status_response.json()
-        if status_response.okay:
-            LOGGER.debug('status: %s', status_map)
-            if status_map['status'] != 'complete':
-                time.sleep(DETECTOR_POLL_TIME)
+        while True:
+            # keep polling status until error or complete
+            status_response = requests.get(status_url)
+            status_map = status_response.json()
+            if status_response.okay:
+                LOGGER.debug('status: %s', status_map)
+                if status_map['status'] != 'complete':
+                    time.sleep(DETECTOR_POLL_TIME)
+                else:
+                    break
             else:
+                LOGGER.error('error: %s', status_map['status'])
                 break
-        else:
-            LOGGER.error('error: %s', status_map['status'])
-            break
 
-    if status_response.okay:
-        bb_box_list = status_map['bounding_box_list']
-        if not bb_box_list:
-            return None
-        LOGGER.debug('bounding boxes: %s', bb_box_list)
-        download_url = status_map['annotated_png_url']
-        png_image_path = os.path.join(
-            dam_image_workspace, '%s_%s.png' % (
-                grid_tag, os.path.basename(
-                    os.path.splitext(rgb_raster_path)[0])))
-        with requests.get(download_url, stream=True) as r:
-            with open(png_image_path, 'wb') as f:
-                shutil.copyfileobj(r.raw, f)
+        if status_response.okay:
+            bb_box_list = status_map['bounding_box_list']
+            if not bb_box_list:
+                return None
+            LOGGER.debug('bounding boxes: %s', bb_box_list)
+            download_url = status_map['annotated_png_url']
+            png_image_path = os.path.join(
+                dam_image_workspace, '%s_%s.png' % (
+                    grid_tag, os.path.basename(
+                        os.path.splitext(rgb_raster_path)[0])))
+            with requests.get(download_url, stream=True) as r:
+                with open(png_image_path, 'wb') as f:
+                    shutil.copyfileobj(r.raw, f)
 
-        geotransform = pygeoprocessing.get_raster_info(
-            rgb_raster_path)['geotransform']
-        lat_lng_list = []
-        for box in bb_box_list:
-            ul_corner = gdal.ApplyGeoTransform(
-                geotransform, float(box.bounds[0]), float(box.bounds[1]))
-            lr_corner = gdal.ApplyGeoTransform(
-                geotransform, float(box.bounds[2]), float(box.bounds[3]))
-            lat_lng_list.append((ul_corner, lr_corner))
-        return png_image_path, lat_lng_list
+            geotransform = pygeoprocessing.get_raster_info(
+                rgb_raster_path)['geotransform']
+            lat_lng_list = []
+            for box in bb_box_list:
+                ul_corner = gdal.ApplyGeoTransform(
+                    geotransform, float(box.bounds[0]), float(box.bounds[1]))
+                lr_corner = gdal.ApplyGeoTransform(
+                    geotransform, float(box.bounds[2]), float(box.bounds[3]))
+                lat_lng_list.append((ul_corner, lr_corner))
+            return png_image_path, lat_lng_list
 
-    return None
+        return None
+    finally:
+        inference_worker_ip_queue.put(host_and_port)
+        LOGGER.debug('done with %s', host_and_port)
 
 
 def load_model(path_to_model):
@@ -1008,14 +1015,6 @@ def main():
     cursor.close()
     connection.commit()
 
-    inference_model_path = os.path.join(
-        WORKSPACE_DIR, os.path.basename(INFERENCE_MODEL_URL))
-    task_graph.add_task(
-        func=ecoshard.download_url,
-        args=(INFERENCE_MODEL_URL, inference_model_path),
-        target_path_list=[inference_model_path],
-        task_name='download TF model')
-    task_graph.join()
     ro_database_uri = 'file:%s?mode=ro' % DATABASE_PATH
     database_path = DATABASE_PATH
 
@@ -1076,10 +1075,11 @@ def main():
     download_worker_thread.start()
 
     worker_id = 0
+    inference_worker_ip_queue = queue.Queue()
     inference_worker_thread = threading.Thread(
         target=inference_worker,
-        args=(inference_worker_pipe, database_path, worker_id,
-              inference_model_path))
+        args=(inference_worker_ip_queue, inference_worker_pipe,
+              database_path, worker_id))
     inference_worker_thread.start()
 
     APP.run(host='0.0.0.0', port=80)
