@@ -22,12 +22,12 @@ height, width = image.size
 image_array = numpy.array(image.getdata()).reshape((height, width, 3))
 print(image_array.shape)
 
-host_and_port = sys.argv[1]
-target_url = "http://%s/api/v1/detect_dam" % host_and_port
+host_and_port = "http://%s" % sys.argv[1]
+detect_dam_url = "%s/api/v1/detect_dam" % host_and_port
 
-print('uploading %s to %s' % (file_path, target_url))
+print('uploading %s to %s' % (file_path, detect_dam_url))
 
-r = requests.post(target_url)
+r = requests.post(detect_dam_url)
 print(r.json())
 upload_url = r.json()['upload_url']
 
@@ -53,8 +53,7 @@ while True:
 if okay:
     print(r['bounding_box_list'])
     local_filename = r['annotated_png_url_base'].split('/')[-1]
-    annotated_png_url = target_url+r['annotated_png_url_base']
-    print(target_url)
+    annotated_png_url = host_and_port+r['annotated_png_url_base']
     print(annotated_png_url)
     with requests.get(annotated_png_url, stream=True) as r:
         with open(local_filename, 'wb') as f:
