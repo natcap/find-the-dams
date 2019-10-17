@@ -205,7 +205,7 @@ def do_detection(tf_graph, threshold_level, png_path):
     del image_draw
     annotated_path = os.path.join(
         ANNOTATED_IMAGE_DIR,
-        '%s_annotated%s' % os.path.splitext(png_path))
+        '%s_annotated%s' % os.path.splitext(os.path.basename(png_path)))
     image.save(annotated_path)
     LOGGER.debug('saved to %s', annotated_path)
     return annotated_path, bb_list
