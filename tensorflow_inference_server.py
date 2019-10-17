@@ -125,9 +125,10 @@ def do_detection(tf_graph, threshold_level, png_path):
 
     """
     image = PIL.Image.open(png_path).convert("RGB")
+
     image_array = numpy.array(image.getdata()).reshape(
         image.size[1], image.size[0], 3)
-    LOGGER.debug('detection on %s (%s)', png_path, str(image.size))
+    LOGGER.debug('detection on %s (%s)', png_path, str(image_array.shape))
     with tf_graph.as_default():
         with tf.Session(graph=tf_graph) as sess:
             image_array_expanded = numpy.expand_dims(image_array, axis=0)
