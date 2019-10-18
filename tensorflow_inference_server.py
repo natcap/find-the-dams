@@ -1,4 +1,12 @@
-"""RESTful server to process an image."""
+"""RESTful server to process an image.
+
+Run like this:
+
+    docker run -it --rm -p 8080:8080 {--runtime=nvidia} \
+        natcap/dam-inference-server-cpu{gpu}:0.0.1 \
+        "python tensorflow_inference_server.py 8080"
+
+"""
 import logging
 import os
 import queue
