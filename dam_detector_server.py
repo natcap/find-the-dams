@@ -5,8 +5,8 @@ Launch like this:
 
 sudo docker build docker-image/ -t therealspring/dam-detection:0.0.1
 
-hg pull && hg up && sudo docker run -it --rm -p 80:80 -v
-    `pwd`:/workspace therealspring/dam-detection:0.0.1
+hg fetch && sudo docker run -it --rm -p 80:80 -v \
+    `pwd`:/workspace therealspring/dam-detection:0.0.1 \
     "python dam_detector_server.py"
 
 There are x steps:
@@ -1129,7 +1129,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description='Start dam detection server.')
     parser.add_argument(
-        'host-file', help=(
+        'host_file', help=(
             'Path to list of host fqdn/ip/port for inference workers '
             'running the natcap/dam-inference-server docker container'))
     parser.add_argument(
