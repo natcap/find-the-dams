@@ -878,10 +878,19 @@ def do_detection(
     image_array = numpy.array(image.getdata()).reshape((height, width, 3))
     print(image_array.shape)
 
-    host_and_port = inference_worker_host_queue.get()
-    LOGGER.debug('connecting to %s', host_and_port)
+    # ensure we get a valid host
+    while True:
+        LOGGER.debug('fetching inference worker host')
+        inference_worker_host = inference_worker_host_queue.get()
+        LOGGER.debug('inference worker host: %s', inference_worker_host)
+        with GLOBAL_LOCK:
+            # if not this get will have removed the invalid host
+            if inference_worker_host in GLOBAL_HOST_SET:
+                break
+
+    LOGGER.debug('connecting to %s', inference_worker_host)
     try:
-        detect_dam_url = "%s/api/v1/detect_dam" % host_and_port
+        detect_dam_url = "%s/api/v1/detect_dam" % inference_worker_host
 
         print('uploading %s to %s' % (rgb_raster_path, detect_dam_url))
 
@@ -934,8 +943,8 @@ def do_detection(
 
         return None
     finally:
-        inference_worker_host_queue.put(host_and_port)
-        LOGGER.debug('done with %s', host_and_port)
+        inference_worker_host_queue.put(inference_worker_host)
+        LOGGER.debug('done with %s', inference_worker_host)
 
 
 def load_model(path_to_model):
@@ -1092,8 +1101,8 @@ def main():
     schedule_worker_thread.join()
 
 
-def host_file_monitor(inference_host_file_path, host_queue):
-    """Watch `inference_host_file_path` and update host_queue."""
+def host_file_monitor(inference_host_file_path, inference_worker_host_queue):
+    """Watch inference_host_file_path & update inference_worker_host_queue."""
     last_modified_time = 0
     while True:
         try:
@@ -1110,7 +1119,7 @@ def host_file_monitor(inference_host_file_path, host_queue):
                         if not line.startswith('#')])
                     new_hosts = GLOBAL_HOST_SET.difference(old_host_set)
                     for new_host in new_hosts:
-                        host_queue.put(new_host)
+                        inference_worker_host_queue.put(new_host)
             time.wait(DETECTOR_POLL_TIME)
         except Exception:
             LOGGER.exception('exception in `host_file_monitor`')
