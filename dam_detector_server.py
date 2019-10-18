@@ -123,8 +123,6 @@ HOST_FILE_PATH = None
 GLOBAL_LOCK = None
 WORKING_GRID_ID_STATUS_MAP = None
 FRAGMENT_ID_STATUS_MAP = None
-IDENTIFIED_DAM_MAP = None
-KNOWN_DAM_MAP = None
 SESSION_UUID = None
 STATE_TO_COLOR = {
     'unscheduled': '#333333',
@@ -167,6 +165,7 @@ def processing_status():
     """Return results about polygons that are processing."""
     try:
         client_uuid = str(flask.request.form.get('session_uuid'))
+        last_known_dam_id = int(flask.request.form.get('last_known_dam_id'))
         new_session = False
         if client_uuid != SESSION_UUID:
             # we have a new session, reset the remote
@@ -198,11 +197,8 @@ def processing_status():
                     'weight': 1,
                 } for (
                     grid_id, state, lat_min, lng_min, lat_max, lng_max) in
-                cursor.fetchall()
+                cursor.fetchall() if grid_id not in WORKING_GRID_ID_STATUS_MAP
             }
-            for pre_known_dam_id, pre_known_dam_info in KNOWN_DAM_MAP.items():
-                polygons_to_update['pre_known_%s' % pre_known_dam_id] = (
-                    pre_known_dam_info)
         else:
             polygons_to_update = {}
 
@@ -210,9 +206,6 @@ def processing_status():
             for grid_id, fragment_info in FRAGMENT_ID_STATUS_MAP.items():
                 polygons_to_update[grid_id] = fragment_info
 
-            for dam_id, dam_info in IDENTIFIED_DAM_MAP.items():
-                LOGGER.debug(dam_info)
-                polygons_to_update[dam_id] = dam_info
             for grid_id, status in WORKING_GRID_ID_STATUS_MAP.items():
                 if grid_id in polygons_to_update:
                     polygons_to_update[grid_id]['color'] = (
@@ -220,25 +213,34 @@ def processing_status():
                     polygons_to_update[grid_id]['fill'] = 'false'
                     polygons_to_update[grid_id]['weight'] = 5
 
+        cursor.execute(
+            "SELECT dam_id, pre_known, lat_min, lng_min, lat_max, lng_max "
+            "FROM identified_dams "
+            "WHERE dam_id>?", (last_known_dam_id,))
+        for dam_id, pre_known, lat_min, lng_min, lat_max, lng_max in (
+                cursor.items()):
+            polygons_to_update[dam_id] = {
+                'color': (
+                    DAM_STATE_COLOR['pre_known'] if pre_known == 0
+                    else DAM_STATE_COLOR['identified']),
+                'bounds': [
+                    [lat_min, lng_min],
+                    [lat_max, lng_max]],
+                'fill': 'false',
+                'weight': 1,
+            }
+
         # count how many polygons just for reference
         cursor.execute(
-            "SELECT count(grid_id) from grid_status;")
-        (n_processing_units,) = cursor.fetchone()
+            'SELECT max(cast(dam_id as integer)) from identified_dams')
+        (max_dam_id,) = cursor.fetchone()
         # construct final payload
         payload = {
             'query_time': str(datetime.datetime.now()),
-            'n_processing_units': n_processing_units,
+            'max_dam_id': max_dam_id,
             'polygons_to_update': polygons_to_update,
             'session_uuid': SESSION_UUID,
         }
-
-        # add all the spatial analysis status
-        for processing_state in STATE_TO_COLOR:
-            cursor.execute(
-                "SELECT count(grid_id) from grid_status "
-                "WHERE processing_state=?", (processing_state,))
-            payload[processing_state] = cursor.fetchone()[0]
-
         cursor.close()
         connection.commit()
         return json.dumps(payload)
@@ -831,17 +833,6 @@ def inference_worker(
                                 cursor.close()
                                 connection.commit()
 
-                            for (dam_id, _, _, lat_min,
-                                    lng_min, lat_max, lng_max) in (dam_list):
-                                fragment_dam_id = '%s_%s' % (quad_id, dam_id)
-                                IDENTIFIED_DAM_MAP[fragment_dam_id] = {
-                                    'color': DAM_STATE_COLOR['identified'],
-                                    'bounds': [
-                                        [lat_min, lng_min],
-                                        [lat_max, lng_max]],
-                                    'fill': 'false',
-                                    'weight': 1,
-                                }
             LOGGER.debug('removing workspace %s', quad_workspace)
             shutil.rmtree(quad_workspace)
             with GLOBAL_LOCK:
@@ -1038,14 +1029,6 @@ def main(clear_database):
         lng_min, lng_max = list(sorted([
             x['lng'] for x in bounding_box_dict]))
 
-        KNOWN_DAM_MAP[key] = {
-            'color': DAM_STATE_COLOR['pre_known'],
-            'bounds': [
-                [lat_min, lng_min],
-                [lat_max, lng_max]],
-            'fill': 'false',
-            'weight': 1,
-        }
     cursor.close()
     connection.commit()
 
@@ -1199,8 +1182,6 @@ if __name__ == '__main__':
     GLOBAL_HOST_SET = set()
     GLOBAL_HOST_QUEUE = set()
     WORKING_GRID_ID_STATUS_MAP = {}
-    KNOWN_DAM_MAP = {}
     FRAGMENT_ID_STATUS_MAP = {}
-    IDENTIFIED_DAM_MAP = {}
     SESSION_UUID = uuid.uuid4().hex
     main(args.clear_database)
