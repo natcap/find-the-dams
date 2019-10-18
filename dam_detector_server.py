@@ -1087,7 +1087,7 @@ def main():
     inference_worker_host_queue = queue.Queue()
     inference_worker_thread = threading.Thread(
         target=inference_worker,
-        args=(inference_worker_host_queue, inference_worker_pipe,
+        args=(inference_worker_pipe, inference_worker_host_queue,
               database_path, worker_id))
     inference_worker_thread.start()
 
