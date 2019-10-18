@@ -697,7 +697,6 @@ def inference_worker(
 
     """
     try:
-
         with GLOBAL_LOCK:
             connection = sqlite3.connect(database_path)
             cursor = connection.cursor()
@@ -720,7 +719,11 @@ def inference_worker(
             cursor.execute(
                 'SELECT processing_state FROM quad_status '
                 'WHERE quad_id=?', (quad_id,))
-            processing_state = str(cursor.fetchone()[0])
+            payload = cursor.fetchone()
+            if payload is not None:
+                processing_state = str(cursor.fetchone()[0])
+            else:
+                processing_state = None
             cursor.close()
             connection.commit()
             if processing_state == 'complete':
@@ -742,6 +745,7 @@ def inference_worker(
 
             raster_info = pygeoprocessing.get_raster_info(quad_raster_path)
             x_size, y_size = raster_info['raster_size']
+            dam_list = []
             for i_off in range(0, x_size, FRAGMENT_SIZE[0]):
                 for j_off in range(0, y_size, FRAGMENT_SIZE[1]):
                     ul_corner = gdal.ApplyGeoTransform(
@@ -767,7 +771,6 @@ def inference_worker(
                         inference_worker_host_queue, clipped_raster_path,
                         DAM_IMAGE_WORKSPACE, '%s_%s' % (worker_id, quad_id))
                     if detection_result:
-                        dam_list = []
                         image_bb_path, coord_list = detection_result
                         for coord_tuple in coord_list:
                             source_srs = osr.SpatialReference()
@@ -787,32 +790,35 @@ def inference_worker(
                                 str((ul_point.GetX(), ul_point.GetY())),
                                 str((lr_point.GetX(), lr_point.GetY())),
                                 image_bb_path)
-                            current_dam_id += 1
                             dam_list.append((
-                                current_dam_id, 0,
+                                'REPLACEWITHDAMID', 0,
                                 'TensorFlow identified dam %d' % (
                                     current_dam_id),
                                 lr_point.GetY(), lr_point.GetX(),
                                 ul_point.GetY(), ul_point.GetX()))
 
-                        if dam_list:
-                            with GLOBAL_LOCK:
-                                connection = sqlite3.connect(database_path)
-                                cursor = connection.cursor()
-                                cursor.executemany(
-                                    'INSERT INTO identified_dams( '
-                                    'dam_id, pre_known, dam_description, '
-                                    'lat_min, lng_min, lat_max, '
-                                    'lng_max) VALUES(?, ?, ?, ?, ?, ?, ?)',
-                                    dam_list)
+            with GLOBAL_LOCK:
+                connection = sqlite3.connect(database_path)
+                cursor = connection.cursor()
+                cursor.execute(
+                    'SELECT MAX(CAST(dam_id as integer)) '
+                    'FROM identified_dams')
+                (max_dam_id,) = cursor.fetchone()
+                if dam_list:
+                    cursor.executemany(
+                        'INSERT INTO identified_dams( '
+                        'dam_id, pre_known, dam_description, '
+                        'lat_min, lng_min, lat_max, '
+                        'lng_max) VALUES(?, ?, ?, ?, ?, ?, ?)',
+                        [(max_dam_id+index+1,)+dam_tuple
+                         for index, dam_tuple in enumerate(dam_list)])
 
-                                cursor.execute(
-                                    'UPDATE quad_status '
-                                    'SET processing_state="complete"'
-                                    'WHERE quad_id=?', (quad_id,))
-
-                                cursor.close()
-                                connection.commit()
+                cursor.execute(
+                    'UPDATE quad_status '
+                    'SET processing_state="complete"'
+                    'WHERE quad_id=?', (quad_id,))
+                cursor.close()
+                connection.commit()
 
             LOGGER.debug('removing workspace %s', quad_workspace)
             shutil.rmtree(quad_workspace)
