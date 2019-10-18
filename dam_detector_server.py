@@ -555,15 +555,15 @@ def schedule_worker(download_work_pipe, readonly_database_uri):
 
 
 def download_worker(
-        download_worker_pipe, inference_worker_work_queue, database_path, planet_api_key,
-        mosaic_quad_list_url, planet_quads_dir):
+        download_worker_pipe, inference_worker_work_queue, database_path,
+        planet_api_key, mosaic_quad_list_url, planet_quads_dir):
     """Fetch Planet quads as requested.
 
     Parameters:
         download_worker_pipe (multiprocessing.Connection): this pipe will
             serve the next grid ID to download quads for.
-        inference_worker_work_queue (multiprocessing.Connection): this pipe is used to
-            send planet quad id/path tuples for the inference worker.
+        inference_worker_work_queue (multiprocessing.Connection): this pipe is
+            used to send planet quad id/path tuples for the inference worker.
         database_path (str): path to writable sqlite database.
         planet_api_key (str): key to access Planet's RESTful API.
         mosaic_quad_list_url (str): url that has the Planet global mosaic to
@@ -698,8 +698,8 @@ def download_url_to_file(url, target_file_path):
 
 
 def inference_worker(
-        inference_worker_work_queue, inference_worker_host_queue, database_path,
-        worker_id):
+        inference_worker_work_queue, inference_worker_host_queue,
+        database_path, worker_id):
     """Take large quads and search for dams.
 
     Parameters:
@@ -711,7 +711,7 @@ def inference_worker(
             host/port strings that can be used as the base to connect to
             the API server. This queue is used to manage multiple servers
             and if they are currently being used/removed/added.
-        database_path (str): URI to writeable version of database to store
+        database_path (str): URI to writable version of database to store
             found dams.
         worker_id (int): a unique ID to identify which worker so we can
             uniquely identify each dam.
@@ -737,6 +737,22 @@ def inference_worker(
             quad_id, quad_raster_path = inference_worker_work_queue.get()
             quad_workspace = os.path.join(
                 WORKSPACE_DIR, '%s_%s' % (worker_id, quad_id))
+
+            # skip if already calculated
+            connection = sqlite3.connect(database_path)
+            cursor = connection.cursor()
+            cursor.execute(
+                'SELECT processing_state FROM quad_status '
+                'WHERE quad_id=?', (quad_id,))
+            processing_state = str(cursor.fetchone()[0])
+            cursor.close()
+            connection.commit()
+            if processing_state == 'complete':
+                with GLOBAL_LOCK:
+                    del FRAGMENT_ID_STATUS_MAP[quad_id]
+                LOGGER.info('already completed %s', quad_id)
+                continue
+
             try:
                 os.makedirs(quad_workspace)
             except OSError:
@@ -836,8 +852,7 @@ def inference_worker(
             LOGGER.debug('removing workspace %s', quad_workspace)
             shutil.rmtree(quad_workspace)
             with GLOBAL_LOCK:
-                FRAGMENT_ID_STATUS_MAP[quad_id]['color'] = (
-                    STATE_TO_COLOR['complete'])
+                del FRAGMENT_ID_STATUS_MAP[quad_id]
     except Exception:
         LOGGER.exception("Exception in inference_worker")
 
