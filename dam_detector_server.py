@@ -220,7 +220,7 @@ def processing_status():
         for dam_id, pre_known, lat_min, lng_min, lat_max, lng_max in cursor:
             polygons_to_update[dam_id] = {
                 'color': (
-                    DAM_STATE_COLOR['pre_known'] if pre_known == 0
+                    DAM_STATE_COLOR['pre_known'] if pre_known == int(0)
                     else DAM_STATE_COLOR['identified']),
                 'bounds': [
                     [lat_min, lng_min],
