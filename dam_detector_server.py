@@ -985,20 +985,29 @@ def load_model(path_to_model):
     return detection_graph
 
 
-def main():
-    """Entry point."""
+def main(clear_database):
+    """Entry point.
+
+    Parameters:
+        clear_database (bool): If true will trigger a reconstruction of the
+            database if it doesn't exist.
+
+    """
     for dirname in [WORKSPACE_DIR, DAM_IMAGE_WORKSPACE]:
         try:
             os.makedirs(dirname)
         except OSError:
             pass
     task_graph = taskgraph.TaskGraph(WORKSPACE_DIR, -1, 5.0)
-    initalize_database_task = task_graph.add_task(
-        func=initalize_spatial_search_units,
-        args=(DATABASE_PATH, INITALIZE_DATABASE_TOKEN_PATH),
-        target_path_list=[INITALIZE_DATABASE_TOKEN_PATH],
-        ignore_path_list=[DATABASE_PATH],
-        task_name='initialize database')
+    if clear_database:
+        initalize_database_task = task_graph.add_task(
+            func=initalize_spatial_search_units,
+            args=(DATABASE_PATH, INITALIZE_DATABASE_TOKEN_PATH),
+            target_path_list=[INITALIZE_DATABASE_TOKEN_PATH],
+            ignore_path_list=[DATABASE_PATH],
+            task_name='initialize database')
+        # wait until the database is initialized before scheduling work
+        initalize_database_task.join()
 
     # go through dam bounding box to put it in global map
     dam_bounding_box_bb_path = os.path.join(
@@ -1045,8 +1054,6 @@ def main():
     download_worker_pipe, download_scheduler_pipe = multiprocessing.Pipe()
     inference_worker_work_queue = queue.Queue(1)
 
-    # wait until the database is initialized before scheduling work
-    initalize_database_task.join()
     schedule_worker_thread = threading.Thread(
         target=schedule_worker,
         args=(download_scheduler_pipe, ro_database_uri))
@@ -1175,6 +1182,7 @@ if __name__ == '__main__':
     HOST_FILE_PATH = args.host_file
     if not os.path.exists(HOST_FILE_PATH):
         raise ValueError('%s does not exist', HOST_FILE_PATH)
+
     if args.clear_database:
         os.remove(INITALIZE_DATABASE_TOKEN_PATH)
         db_base_path, db_extension = os.path.splitext(DATABASE_PATH)
@@ -1195,4 +1203,4 @@ if __name__ == '__main__':
     FRAGMENT_ID_STATUS_MAP = {}
     IDENTIFIED_DAM_MAP = {}
     SESSION_UUID = uuid.uuid4().hex
-    main()
+    main(args.clear_database)
