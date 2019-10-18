@@ -217,8 +217,7 @@ def processing_status():
             "SELECT dam_id, pre_known, lat_min, lng_min, lat_max, lng_max "
             "FROM identified_dams "
             "WHERE dam_id>?", (last_known_dam_id,))
-        for dam_id, pre_known, lat_min, lng_min, lat_max, lng_max in (
-                cursor.items()):
+        for dam_id, pre_known, lat_min, lng_min, lat_max, lng_max in cursor:
             polygons_to_update[dam_id] = {
                 'color': (
                     DAM_STATE_COLOR['pre_known'] if pre_known == 0
