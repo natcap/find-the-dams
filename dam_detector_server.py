@@ -555,14 +555,14 @@ def schedule_worker(download_work_pipe, readonly_database_uri):
 
 
 def download_worker(
-        download_worker_pipe, inference_pipe, database_path, planet_api_key,
+        download_worker_pipe, inference_worker_work_queue, database_path, planet_api_key,
         mosaic_quad_list_url, planet_quads_dir):
     """Fetch Planet quads as requested.
 
     Parameters:
         download_worker_pipe (multiprocessing.Connection): this pipe will
             serve the next grid ID to download quads for.
-        inference_pipe (multiprocessing.Connection): this pipe is used to
+        inference_worker_work_queue (multiprocessing.Connection): this pipe is used to
             send planet quad id/path tuples for the inference worker.
         database_path (str): path to writable sqlite database.
         planet_api_key (str): key to access Planet's RESTful API.
@@ -653,9 +653,8 @@ def download_worker(
                     }
 
                 LOGGER.debug('downloaded %s', download_url)
-                inference_pipe.send((quad_id, download_raster_path))
-                # wait for ack
-                inference_pipe.recv()
+                inference_worker_work_queue.put(
+                    (quad_id, download_raster_path))
 
             with GLOBAL_LOCK:
                 connection = sqlite3.connect(database_path)
@@ -699,12 +698,12 @@ def download_url_to_file(url, target_file_path):
 
 
 def inference_worker(
-        inference_pipe, inference_worker_host_queue, database_path,
+        inference_worker_work_queue, inference_worker_host_queue, database_path,
         worker_id):
     """Take large quads and search for dams.
 
     Parameters:
-        inference_pipe (multiprocessing.Connection): will get
+        inference_worker_work_queue (multiprocessing.Connection): will get
             ('fragment_id', 'quad_raster_path') tuples where
             'quad_raster_path' is a path to a geotiff that can be searched
             for dam bounding boxes.
@@ -735,8 +734,7 @@ def inference_worker(
         wgs84_srs = osr.SpatialReference()
         wgs84_srs.ImportFromEPSG(4326)
         while True:
-            quad_id, quad_raster_path = inference_pipe.recv()
-            inference_pipe.send('ack')
+            quad_id, quad_raster_path = inference_worker_work_queue.get()
             quad_workspace = os.path.join(
                 WORKSPACE_DIR, '%s_%s' % (worker_id, quad_id))
             try:
@@ -843,7 +841,8 @@ def inference_worker(
     except Exception:
         LOGGER.exception("Exception in inference_worker")
 
-
+@retrying.retry(
+    wait_exponential_multiplier=1000, wait_exponential_max=10000)
 def do_detection(
         inference_worker_host_queue, rgb_raster_path, dam_image_workspace,
         grid_tag):
@@ -894,17 +893,20 @@ def do_detection(
 
         print('uploading %s to %s' % (rgb_raster_path, detect_dam_url))
 
-        initial_response = requests.post(detect_dam_url)
+        initial_response = requests.post(
+            detect_dam_url, timeout=REQUEST_TIMEOUT)
         LOGGER.debug('initial_response: %s', initial_response)
         upload_url = initial_response.json()['upload_url']
         upload_response = requests.put(
-            upload_url, files={'file': open(png_path, 'rb')})
+            upload_url, files={'file': open(png_path, 'rb')},
+            timeout=REQUEST_TIMEOUT)
         LOGGER.debug('upload_response: %s', upload_response)
         status_url = upload_response.json()['status_url']
 
         while True:
             # keep polling status until error or complete
-            status_response = requests.get(status_url)
+            status_response = requests.get(
+                status_url, timeout=REQUEST_TIMEOUT)
             status_map = status_response.json()
             if status_response.ok:
                 LOGGER.debug('status: %s', status_map)
@@ -926,7 +928,8 @@ def do_detection(
                 dam_image_workspace, '%s_%s.png' % (
                     grid_tag, os.path.basename(
                         os.path.splitext(rgb_raster_path)[0])))
-            with requests.get(download_url, stream=True) as r:
+            with requests.get(
+                    download_url, stream=True, timeout=REQUEST_TIMEOUT) as r:
                 with open(png_image_path, 'wb') as f:
                     shutil.copyfileobj(r.raw, f)
 
@@ -942,6 +945,9 @@ def do_detection(
             return png_image_path, lat_lng_list
 
         return None
+    except Exception:
+        LOGGER.exception('something bad happened on do_detection')
+        raise
     finally:
         inference_worker_host_queue.put(inference_worker_host)
         LOGGER.debug('done with %s', inference_worker_host)
@@ -1025,10 +1031,9 @@ def main():
     connection.commit()
 
     ro_database_uri = 'file:%s?mode=ro' % DATABASE_PATH
-    database_path = DATABASE_PATH
 
     download_worker_pipe, download_scheduler_pipe = multiprocessing.Pipe()
-    inference_worker_pipe, inference_scheduler_pipe = multiprocessing.Pipe()
+    inference_worker_work_queue = queue.Queue()
 
     # wait until the database is initialized before scheduling work
     initalize_database_task.join()
@@ -1079,21 +1084,15 @@ def main():
     download_worker_thread = threading.Thread(
         target=download_worker,
         args=(
-            download_worker_pipe, inference_scheduler_pipe, DATABASE_PATH,
+            download_worker_pipe, inference_worker_work_queue, DATABASE_PATH,
             planet_api_key, mosaic_quad_list_url, planet_quads_dir))
     download_worker_thread.start()
 
-    worker_id = 0
     inference_worker_host_queue = queue.Queue()
-    inference_worker_thread = threading.Thread(
-        target=inference_worker,
-        args=(inference_worker_pipe, inference_worker_host_queue,
-              database_path, worker_id))
-    inference_worker_thread.start()
-
     host_file_monitor_thread = threading.Thread(
         target=host_file_monitor,
-        args=(HOST_FILE_PATH, inference_worker_host_queue))
+        args=(HOST_FILE_PATH, inference_worker_host_queue,
+              inference_worker_work_queue))
     host_file_monitor_thread.start()
 
     APP.run(host='0.0.0.0', port=80)
@@ -1101,9 +1100,23 @@ def main():
     schedule_worker_thread.join()
 
 
-def host_file_monitor(inference_host_file_path, inference_worker_host_queue):
-    """Watch inference_host_file_path & update inference_worker_host_queue."""
+def host_file_monitor(
+        inference_host_file_path, inference_worker_host_queue,
+        inference_worker_work_queue):
+    """Watch inference_host_file_path & update inference_worker_host_queue.
+
+    Parameters:
+        inference_host_file_path (str): path to a file that contains lines
+            of http://[host]:[port] that can be used to send inference work
+            to.
+        inference_worker_host_queue (queue.Queue): new hosts are queued here
+            so they can be pulled by other workers later.
+        inference_worker_work_queue
+
+
+    """
     last_modified_time = 0
+    worker_id = -1
     while True:
         try:
             current_modified_time = os.path.getmtime(inference_host_file_path)
@@ -1120,6 +1133,17 @@ def host_file_monitor(inference_host_file_path, inference_worker_host_queue):
                     new_hosts = GLOBAL_HOST_SET.difference(old_host_set)
                     for new_host in new_hosts:
                         inference_worker_host_queue.put(new_host)
+                    n_hosts = len(GLOBAL_HOST_SET)
+                for _ in range(n_hosts):
+                    worker_id += 1
+                    LOGGER.info(
+                        'starting new inference_worker host %d', worker_id)
+                    inference_worker_thread = threading.Thread(
+                        target=inference_worker,
+                        args=(inference_worker_work_queue,
+                              inference_worker_host_queue,
+                              DATABASE_PATH, worker_id))
+                    inference_worker_thread.start()
             time.sleep(DETECTOR_POLL_TIME)
         except Exception:
             LOGGER.exception('exception in `host_file_monitor`')
