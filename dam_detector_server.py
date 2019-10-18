@@ -190,7 +190,7 @@ def processing_status():
             # updated on the client
 
             polygons_to_update = {
-                grid_id: {
+                'grid_%s' % grid_id: {
                     'bounds': [[lat_min, lng_min], [lat_max, lng_max]],
                     'color': STATE_TO_COLOR[state],
                     'fill': 'true',
@@ -207,11 +207,10 @@ def processing_status():
                 polygons_to_update[grid_id] = fragment_info
 
             for grid_id, status in WORKING_GRID_ID_STATUS_MAP.items():
-                if grid_id in polygons_to_update:
-                    polygons_to_update[grid_id]['color'] = (
-                        STATE_TO_COLOR[status])
-                    polygons_to_update[grid_id]['fill'] = 'false'
-                    polygons_to_update[grid_id]['weight'] = 5
+                polygons_to_update['grid_%s' % grid_id]['color'] = (
+                    STATE_TO_COLOR[status])
+                polygons_to_update['grid_%s' % grid_id]['fill'] = 'false'
+                polygons_to_update['grid_%s' % grid_id]['weight'] = 5
 
         cursor.execute(
             "SELECT dam_id, pre_known, lat_min, lng_min, lat_max, lng_max "
