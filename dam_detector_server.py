@@ -139,13 +139,6 @@ DAM_STATE_COLOR = {
     'pre_known': '#0000F0',
 }
 
-NEXT_STATE = {
-    'unscheduled': 'scheduled',
-    'scheduled': 'downloaded',
-    'downloaded': 'analyzing',
-    'analyzing': 'complete',
-}
-
 APP = Flask(__name__, static_url_path='', static_folder='')
 
 
@@ -548,7 +541,7 @@ def schedule_worker(download_work_pipe, readonly_database_uri):
             # wait for acknowledgment
             _ = download_work_pipe.recv()  # noqa: F841
             with GLOBAL_LOCK:
-                WORKING_GRID_ID_STATUS_MAP[grid_id] = 'scheduled'
+                WORKING_GRID_ID_STATUS_MAP[grid_id] = 'analyzing'
     except Exception:
         LOGGER.exception('exception in schedule worker')
     LOGGER.debug("schedule worker is terminating!")
