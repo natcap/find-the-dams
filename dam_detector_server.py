@@ -906,7 +906,7 @@ def do_detection(
             # keep polling status until error or complete
             status_response = requests.get(status_url)
             status_map = status_response.json()
-            if status_response.okay:
+            if status_response.ok:
                 LOGGER.debug('status: %s', status_map)
                 if status_map['status'] != 'complete':
                     time.sleep(DETECTOR_POLL_TIME)
@@ -916,7 +916,7 @@ def do_detection(
                 LOGGER.error('error: %s', status_map['status'])
                 break
 
-        if status_response.okay:
+        if status_response.ok:
             bb_box_list = status_map['bounding_box_list']
             if not bb_box_list:
                 return None
