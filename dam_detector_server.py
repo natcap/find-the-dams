@@ -1033,7 +1033,7 @@ def main():
     ro_database_uri = 'file:%s?mode=ro' % DATABASE_PATH
 
     download_worker_pipe, download_scheduler_pipe = multiprocessing.Pipe()
-    inference_worker_work_queue = queue.Queue()
+    inference_worker_work_queue = queue.Queue(1)
 
     # wait until the database is initialized before scheduling work
     initalize_database_task.join()
