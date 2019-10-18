@@ -1120,7 +1120,7 @@ def host_file_monitor(inference_host_file_path, inference_worker_host_queue):
                     new_hosts = GLOBAL_HOST_SET.difference(old_host_set)
                     for new_host in new_hosts:
                         inference_worker_host_queue.put(new_host)
-            time.wait(DETECTOR_POLL_TIME)
+            time.sleep(DETECTOR_POLL_TIME)
         except Exception:
             LOGGER.exception('exception in `host_file_monitor`')
 
