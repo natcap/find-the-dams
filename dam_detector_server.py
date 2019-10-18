@@ -1116,7 +1116,7 @@ def host_file_monitor(inference_host_file_path, inference_worker_host_queue):
                     old_host_set = GLOBAL_HOST_SET
                     GLOBAL_HOST_SET = set([
                         line.strip() for line in ip_file_contents
-                        if not line.startswith('#')])
+                        if line.startswith('http')])
                     new_hosts = GLOBAL_HOST_SET.difference(old_host_set)
                     for new_host in new_hosts:
                         inference_worker_host_queue.put(new_host)
