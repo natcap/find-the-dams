@@ -166,7 +166,6 @@ def do_detection(tf_graph, threshold_level, png_path):
 
     """
     image = PIL.Image.open(png_path).convert("RGB")
-
     image_array = numpy.array(image.getdata()).reshape(
         image.size[1], image.size[0], 3)
     LOGGER.debug('detection on %s (%s)', png_path, str(image_array.shape))
@@ -232,20 +231,7 @@ def do_detection(tf_graph, threshold_level, png_path):
     if bb_box_list:
         LOGGER.debug('*** found a bounding box')
 
-    bb_list = []
-    image_draw = PIL.ImageDraw.Draw(image)
-    for box in bb_box_list:
-        image_draw.rectangle(box.bounds, outline='RED')
-        ul_corner = (float(box.bounds[0]), float(box.bounds[1]))
-        lr_corner = (float(box.bounds[2]), float(box.bounds[3]))
-        bb_list.append((ul_corner, lr_corner))
-    del image_draw
-    annotated_path = os.path.join(
-        ANNOTATED_IMAGE_DIR,
-        '%s_annotated%s' % os.path.splitext(os.path.basename(png_path)))
-    image.save(annotated_path)
-    LOGGER.debug('saved to %s', annotated_path)
-    return annotated_path, bb_list
+    return bb_box_list, png_path
 
 
 def load_model(path_to_model):
@@ -277,7 +263,8 @@ def session_map_to_response(session_map):
     return session_map
 
 
-def inference_worker(tf_graph_path, work_queue):
+def inference_worker(
+        tf_graph_path, work_queue, inference_worker_payload_queue):
     """Process images as they are sent to the server.
 
     Processes tuples from work_queue and updates SESSION_MANAGER_MAP either
@@ -287,6 +274,8 @@ def inference_worker(tf_graph_path, work_queue):
     Parameters:
         tf_graph_path (str): path to Tensorflow 1.12.0 frozen inference graph.
         work_queue (queue): expect (session_id, png_path) tuples
+        inference_worker_payload_queue (queue): pass resultof do detection
+            for finalization here.
 
     Returns:
         None
@@ -305,16 +294,41 @@ def inference_worker(tf_graph_path, work_queue):
                 pass
             try:
                 payload = do_detection(tf_graph, THRESHOLD_LEVEL, png_path)
+                inference_worker_payload_queue.put((payload, session_id))
             except Exception:
                 with SESSION_MANAGER_LOCK:
                     SESSION_MANAGER_MAP[session_id] = {
                         'status': traceback.format_exc(),
                         'http_status_code': 500,
                     }
-                continue
+
+        except Exception:
+            LOGGER.exception('exception in inference worker')
+
+
+def render_image_and_finalize(inference_worker_payload_queue):
+    """Take a payload and render the image and update the session manager."""
+    while True:
+        try:
+            (bb_box_list, png_path), session_id = (
+                inference_worker_payload_queue.get())
+            image = PIL.Image.open(png_path).convert("RGB")
+            bb_list = []
+            image_draw = PIL.ImageDraw.Draw(image)
+            for box in bb_box_list:
+                image_draw.rectangle(box.bounds, outline='RED')
+                ul_corner = (float(box.bounds[0]), float(box.bounds[1]))
+                lr_corner = (float(box.bounds[2]), float(box.bounds[3]))
+                bb_list.append((ul_corner, lr_corner))
+            del image_draw
+            annotated_path = os.path.join(
+                ANNOTATED_IMAGE_DIR,
+                '%s_annotated%s' % os.path.splitext(
+                    os.path.basename(png_path)))
+            image.save(annotated_path)
+            LOGGER.debug('saved to %s', annotated_path)
 
             with SESSION_MANAGER_LOCK:
-                annotated_path, bb_list = payload
                 SESSION_MANAGER_MAP[session_id] = {
                     'status': 'complete',
                     'annotated_png_filename': os.path.basename(
@@ -327,7 +341,7 @@ def inference_worker(tf_graph_path, work_queue):
                 LAST_ACCESSED_SESSION_MAP[session_id]['file_list'].append(
                     annotated_path)
         except Exception:
-            LOGGER.exception('exception in inference worker')
+            LOGGER.exception('exception in render_image_and_finalize')
 
 
 def garbage_collection():
