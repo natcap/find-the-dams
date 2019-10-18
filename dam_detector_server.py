@@ -180,37 +180,28 @@ def processing_status():
         connection = sqlite3.connect(database_uri, uri=True)
         cursor = connection.cursor()
 
-        if new_session:
-            # fetch all grids
-            cursor.execute(
-                "SELECT grid_id, processing_state, lat_min, lng_min, lat_max, "
-                "lng_max FROM grid_status")
+        # fetch all grids
+        cursor.execute(
+            "SELECT grid_id, processing_state, lat_min, lng_min, lat_max, "
+            "lng_max FROM grid_status")
 
-            # construct a return object that indicated which polygons should be
-            # updated on the client
+        # construct a return object that indicated which polygons should be
+        # updated on the client
 
-            polygons_to_update = {
-                'grid_%s' % grid_id: {
-                    'bounds': [[lat_min, lng_min], [lat_max, lng_max]],
-                    'color': STATE_TO_COLOR[state],
-                    'fill': 'true',
-                    'weight': 1,
-                } for (
-                    grid_id, state, lat_min, lng_min, lat_max, lng_max) in
-                cursor.fetchall()
-            }
-        else:
-            polygons_to_update = {}
+        polygons_to_update = {
+            'grid_%s' % grid_id: {
+                'bounds': [[lat_min, lng_min], [lat_max, lng_max]],
+                'color': STATE_TO_COLOR[state],
+                'fill': 'true',
+                'weight': 1,
+            } for (
+                grid_id, state, lat_min, lng_min, lat_max, lng_max) in
+            cursor.fetchall()
+        }
 
         with GLOBAL_LOCK:
             for grid_id, fragment_info in FRAGMENT_ID_STATUS_MAP.items():
                 polygons_to_update[grid_id] = fragment_info
-
-            for grid_id, status in WORKING_GRID_ID_STATUS_MAP.items():
-                polygons_to_update['grid_%s' % grid_id]['color'] = (
-                    STATE_TO_COLOR[status])
-                polygons_to_update['grid_%s' % grid_id]['fill'] = 'false'
-                polygons_to_update['grid_%s' % grid_id]['weight'] = 5
 
         cursor.execute(
             "SELECT dam_id, pre_known, lat_min, lng_min, lat_max, lng_max "
