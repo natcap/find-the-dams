@@ -1121,7 +1121,7 @@ def host_file_monitor(
                     new_hosts = GLOBAL_HOST_SET.difference(old_host_set)
                     for new_host in new_hosts:
                         inference_worker_host_queue.put(new_host)
-                    n_hosts = len(GLOBAL_HOST_SET)
+                    n_hosts = len(new_hosts)
                 for _ in range(n_hosts):
                     worker_id += 1
                     LOGGER.info(
