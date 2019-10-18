@@ -935,9 +935,9 @@ def do_detection(
             lat_lng_list = []
             for box in bb_box_list:
                 ul_corner = gdal.ApplyGeoTransform(
-                    geotransform, float(box.bounds[0]), float(box.bounds[1]))
+                    geotransform, float(box[0]), float(box[1]))
                 lr_corner = gdal.ApplyGeoTransform(
-                    geotransform, float(box.bounds[2]), float(box.bounds[3]))
+                    geotransform, float(box[2]), float(box[3]))
                 lat_lng_list.append((ul_corner, lr_corner))
             return png_image_path, lat_lng_list
 
