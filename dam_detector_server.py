@@ -97,7 +97,7 @@ logging.basicConfig(
         '%(asctime)s (%(relativeCreated)d) %(levelname)s %(name)s'
         ' [%(funcName)s:%(lineno)d] %(message)s'),
     stream=sys.stdout)
-logging.getLogger('taskgraph').setLevel(logging.DEBUG)
+logging.getLogger('taskgraph').setLevel(logging.INFO)
 
 DAM_BOUNDING_BOX_URL = (
     'https://storage.googleapis.com/natcap-natgeo-dam-ecoshards/'
