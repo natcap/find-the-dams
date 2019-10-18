@@ -164,15 +164,7 @@ def index():
 def processing_status():
     """Return results about polygons that are processing."""
     try:
-        client_uuid = str(flask.request.form.get('session_uuid'))
         last_known_dam_id = int(flask.request.form.get('last_known_dam_id'))
-        new_session = False
-        if client_uuid != SESSION_UUID:
-            # we have a new session, reset the remote
-            LOGGER.debug(
-                '%s is not equal to %s uuid so resetting remote',
-                client_uuid, SESSION_UUID)
-            new_session = True
         payload = None
         polygons_to_update = {}
         LOGGER.debug(flask.request.form)
@@ -192,7 +184,7 @@ def processing_status():
             'grid_%s' % grid_id: {
                 'bounds': [[lat_min, lng_min], [lat_max, lng_max]],
                 'color': STATE_TO_COLOR[state],
-                'fill': 'true',
+                'fill': 'true' if state == 'unscheduled' else 'false',
                 'weight': 1,
             } for (
                 grid_id, state, lat_min, lng_min, lat_max, lng_max) in
