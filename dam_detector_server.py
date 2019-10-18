@@ -880,14 +880,16 @@ def do_detection(
     # ensure we get a valid host
     while True:
         LOGGER.debug('fetching inference worker host')
-        inference_worker_host = inference_worker_host_queue.get()
-        LOGGER.debug('inference worker host: %s', inference_worker_host)
+        inference_worker_host_raw = inference_worker_host_queue.get()
+        LOGGER.debug('inference worker host: %s', inference_worker_host_raw)
         with GLOBAL_LOCK:
             # if not this get will have removed the invalid host
-            if inference_worker_host in GLOBAL_HOST_SET:
+            if inference_worker_host_raw in GLOBAL_HOST_SET:
                 break
 
-    LOGGER.debug('connecting to %s', inference_worker_host)
+    LOGGER.debug('connecting to %s', inference_worker_host_raw)
+    # split off the '?' label if it's there
+    inference_worker_host = inference_worker_host_raw.split('?')[0]
     try:
         detect_dam_url = "%s/api/v1/detect_dam" % inference_worker_host
 
@@ -949,8 +951,8 @@ def do_detection(
         LOGGER.exception('something bad happened on do_detection')
         raise
     finally:
-        inference_worker_host_queue.put(inference_worker_host)
-        LOGGER.debug('done with %s', inference_worker_host)
+        inference_worker_host_queue.put(inference_worker_host_raw)
+        LOGGER.debug('done with %s', inference_worker_host_raw)
 
 
 def load_model(path_to_model):
@@ -1107,8 +1109,9 @@ def host_file_monitor(
 
     Parameters:
         inference_host_file_path (str): path to a file that contains lines
-            of http://[host]:[port] that can be used to send inference work
-            to.
+            of http://[host]:[port]<?label> that can be used to send inference
+            work to. <label> can be used to use the same machine more than
+            once.
         inference_worker_host_queue (queue.Queue): new hosts are queued here
             so they can be pulled by other workers later.
         inference_worker_work_queue
