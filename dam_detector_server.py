@@ -116,7 +116,10 @@ REQUEST_TIMEOUT = 5
 FRAGMENT_SIZE = (419, 419)  # dims to fragment a Planet quad
 THRESHOLD_LEVEL = 0.08
 DETECTOR_POLL_TIME = 3  # seconds to wait between detector complete checks
+GLOBAL_HOST_SET = None
+GLOBAL_HOST_QUEUE = None
 DATABASE_STATUS_STR = None
+HOST_FILE_PATH = None
 GLOBAL_LOCK = None
 WORKING_GRID_ID_STATUS_MAP = None
 FRAGMENT_ID_STATUS_MAP = None
@@ -574,7 +577,6 @@ def download_worker(
 
     """
     try:
-        global FRAGMENT_ID_STATUS_MAP
         LOGGER.debug('starting fetch queue worker')
         session = requests.Session()
         session.auth = (planet_api_key, '')
@@ -697,7 +699,8 @@ def download_url_to_file(url, target_file_path):
 
 
 def inference_worker(
-        inference_pipe, inference_worker_ip_queue, database_path, worker_id):
+        inference_pipe, inference_worker_host_queue, database_path,
+        worker_id):
     """Take large quads and search for dams.
 
     Parameters:
@@ -705,7 +708,7 @@ def inference_worker(
             ('fragment_id', 'quad_raster_path') tuples where
             'quad_raster_path' is a path to a geotiff that can be searched
             for dam bounding boxes.
-        inference_worker_ip_queue (queue.Queue): contains a queue of
+        inference_worker_host_queue (queue.Queue): contains a queue of
             host/port strings that can be used as the base to connect to
             the API server. This queue is used to manage multiple servers
             and if they are currently being used/removed/added.
@@ -768,11 +771,10 @@ def inference_worker(
                         clipped_raster_path, 'near',
                         target_bb=[xmin, ymin, xmax, ymax])
                     # TODO: get the list of bb coords here and then make
-                    # a transformed lat/lng bounding box and also save the
                     # image file somewhere and also make an entry in the
-                    # database
+                    # database for image
                     detection_result = do_detection(
-                        inference_worker_ip_queue, clipped_raster_path,
+                        inference_worker_host_queue, clipped_raster_path,
                         DAM_IMAGE_WORKSPACE, '%s_%s' % (worker_id, quad_id))
                     if detection_result:
                         dam_list = []
@@ -843,12 +845,12 @@ def inference_worker(
 
 
 def do_detection(
-        inference_worker_ip_queue, rgb_raster_path, dam_image_workspace,
+        inference_worker_host_queue, rgb_raster_path, dam_image_workspace,
         grid_tag):
     """Detect whatever the graph is supposed to detect on a single image.
 
     Parameters:
-        inference_worker_ip_queue (queue.Queue): contains a queue of
+        inference_worker_host_queue (queue.Queue): contains a queue of
             host/port strings that can be used as the base to connect to
             the API server. This queue is used to manage multiple servers
             and if they are currently being used/removed/added.
@@ -876,7 +878,7 @@ def do_detection(
     image_array = numpy.array(image.getdata()).reshape((height, width, 3))
     print(image_array.shape)
 
-    host_and_port = inference_worker_ip_queue.get()
+    host_and_port = inference_worker_host_queue.get()
     LOGGER.debug('connecting to %s', host_and_port)
     try:
         detect_dam_url = "%s/api/v1/detect_dam" % host_and_port
@@ -932,7 +934,7 @@ def do_detection(
 
         return None
     finally:
-        inference_worker_ip_queue.put(host_and_port)
+        inference_worker_host_queue.put(host_and_port)
         LOGGER.debug('done with %s', host_and_port)
 
 
@@ -976,8 +978,6 @@ def main():
     # go through dam bounding box to put it in global map
     dam_bounding_box_bb_path = os.path.join(
         WORKSPACE_DIR, os.path.basename(DAM_BOUNDING_BOX_URL))
-    global KNOWN_DAM_MAP
-    KNOWN_DAM_MAP = {}
     connection = sqlite3.connect(dam_bounding_box_bb_path)
     cursor = connection.cursor()
     cursor.execute(
@@ -1075,25 +1075,62 @@ def main():
     download_worker_thread.start()
 
     worker_id = 0
-    inference_worker_ip_queue = queue.Queue()
+    inference_worker_host_queue = queue.Queue()
     inference_worker_thread = threading.Thread(
         target=inference_worker,
-        args=(inference_worker_ip_queue, inference_worker_pipe,
+        args=(inference_worker_host_queue, inference_worker_pipe,
               database_path, worker_id))
     inference_worker_thread.start()
+
+    host_file_monitor_thread = threading.Thread(
+        target=host_file_monitor,
+        args=(HOST_FILE_PATH, inference_worker_host_queue))
+    host_file_monitor_thread.start()
 
     APP.run(host='0.0.0.0', port=80)
     task_graph.close()
     schedule_worker_thread.join()
 
 
+def host_file_monitor(inference_host_file_path, host_queue):
+    """Watch `inference_host_file_path` and update host_queue."""
+    last_modified_time = 0
+    while True:
+        try:
+            current_modified_time = os.path.getmtime(inference_host_file_path)
+            if current_modified_time != last_modified_time:
+                last_modified_time = current_modified_time
+                with open(inference_host_file_path, 'r') as ip_file:
+                    ip_file_contents = ip_file.readlines()
+                with GLOBAL_LOCK:
+                    global GLOBAL_HOST_SET
+                    old_host_set = GLOBAL_HOST_SET
+                    GLOBAL_HOST_SET = set([
+                        line.strip() for line in ip_file_contents
+                        if not line.startswith('#')])
+                    new_hosts = GLOBAL_HOST_SET.difference(old_host_set)
+                    for new_host in new_hosts:
+                        host_queue.put(new_host)
+            time.wait(DETECTOR_POLL_TIME)
+        except Exception:
+            LOGGER.exception('exception in `host_file_monitor`')
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description='Start dam detection server.')
     parser.add_argument(
+        'host-file', help=(
+            'Path to list of host fqdn/ip/port for inference workers '
+            'running the natcap/dam-inference-server docker container'))
+    parser.add_argument(
         '--clear_database', action='store_true',
         help='backs up the dam database and starts over')
+
     args = parser.parse_args()
+    HOST_FILE_PATH = args.host_file
+    if not os.path.exists(HOST_FILE_PATH):
+        raise ValueError('%s does not exist', HOST_FILE_PATH)
     if args.clear_database:
         os.remove(INITALIZE_DATABASE_TOKEN_PATH)
         db_base_path, db_extension = os.path.splitext(DATABASE_PATH)
@@ -1107,7 +1144,10 @@ if __name__ == '__main__':
             DATABASE_PATH, db_backup_path)
 
     GLOBAL_LOCK = threading.Lock()
+    GLOBAL_HOST_SET = set()
+    GLOBAL_HOST_QUEUE = set()
     WORKING_GRID_ID_STATUS_MAP = {}
+    KNOWN_DAM_MAP = {}
     FRAGMENT_ID_STATUS_MAP = {}
     IDENTIFIED_DAM_MAP = {}
     SESSION_UUID = uuid.uuid4().hex
