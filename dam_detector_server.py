@@ -812,14 +812,11 @@ def inference_worker(
                         'lng_max) VALUES(?, ?, ?, ?, ?, ?, ?)',
                         [(max_dam_id+index+1,)+dam_tuple
                          for index, dam_tuple in enumerate(dam_list)])
-                    connection.commit()
                 cursor.execute(
                     'INSERT INTO quad_status (quad_id, processing_state) '
                     'VALUES(?, ?)', (quad_id, "complete"))
-                connection.commit()
-                cursor.execute('SELECT * from quad_status')
-                LOGGER.debug('quad_status: %s', str(cursor.fetchall()))
                 cursor.close()
+                connection.commit()
 
             LOGGER.debug('removing workspace %s', quad_workspace)
             shutil.rmtree(quad_workspace)
