@@ -791,7 +791,7 @@ def inference_worker(
                                 str((lr_point.GetX(), lr_point.GetY())),
                                 image_bb_path)
                             dam_list.append((
-                                'REPLACEWITHDAMID', 0,
+                                0,
                                 'TensorFlow identified dam %d' % (
                                     current_dam_id),
                                 lr_point.GetY(), lr_point.GetX(),
