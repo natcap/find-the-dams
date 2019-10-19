@@ -721,7 +721,7 @@ def inference_worker(
                 'WHERE quad_id=?', (quad_id,))
             payload = cursor.fetchone()
             if payload is not None:
-                processing_state = str(cursor.fetchone()[0])
+                processing_state = str(payload[0])
             else:
                 processing_state = None
             cursor.close()
