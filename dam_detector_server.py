@@ -812,11 +812,9 @@ def inference_worker(
                         'lng_max) VALUES(?, ?, ?, ?, ?, ?, ?)',
                         [(max_dam_id+index+1,)+dam_tuple
                          for index, dam_tuple in enumerate(dam_list)])
-
                 cursor.execute(
-                    'UPDATE quad_status '
-                    'SET processing_state="complete"'
-                    'WHERE quad_id=?', (quad_id,))
+                    'INSERT INTO quad_status (quad_id, processing_state) '
+                    'VALUES(?, ?)', (quad_id, "complete"))
                 cursor.close()
                 connection.commit()
 
