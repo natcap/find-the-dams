@@ -100,55 +100,58 @@
     var session_uuid = 'none';
     var last_known_dam_id = -1;
     function update_processing_status() {
-        $.post({
-            url: '/processing_status',
-            data: {
-                'session_uuid': session_uuid,
-                'last_known_dam_id': last_known_dam_id,
-            },
-            dataType: 'json',
-            success: function (data) {
-                if (session_uuid != data['session_uuid']) {
-                    processing_layer.clearLayers();
-                    status_polygons = {};
+        var all_sent = false;
+        while (!all_sent) {
+            $.post({
+                url: '/processing_status',
+                data: {
+                    'session_uuid': session_uuid,
+                    'last_known_dam_id': last_known_dam_id,
+                },
+                dataType: 'json',
+                success: function (data) {
+                    if (session_uuid != data['session_uuid']) {
+                        processing_layer.clearLayers();
+                        status_polygons = {};
+                    }
+                    session_uuid = data['session_uuid'];
+                    $('#status').html(
+                        '<p>'+data['query_time']+'</p>'+
+                        '<table><tr><th>status</th><th>value</th></tr>'+
+                        '<tr><td>total dam count</td><td>'+data['max_dam_id']+'</td></tr>' +
+                        '<tr><td>session_uuid</td><td>'+session_uuid+'</td></tr>' +
+                        '</table>');
+                    $.each(
+                        data['polygons_to_update'],
+                        function(polygon_id, state) {
+                            if (!(polygon_id in status_polygons)) {
+                                var rect = L.rectangle(
+                                    state['bounds'],
+                                    {
+                                        color: state['color'],
+                                        weight: state['weight'],
+                                        fill: state['fill'] == 'true',
+                                        fillOpacity: 0.6,
+                                    }).addTo(
+                                        processing_layer);
+                                status_polygons[polygon_id] = rect;
+                            } else {
+                                status_polygons[polygon_id].setStyle({
+                                    color: state['color']
+                                });
+                            }
+                        });
+                    last_known_dam_id = data['max_dam_id'];
+                    if data['all_sent'] == 'true' {
+                        all_sent = true;
+                    }
                 }
-                session_uuid = data['session_uuid'];
-                $('#status').html(
-                    '<p>'+data['query_time']+'</p>'+
-                    '<table><tr><th>status</th><th>value</th></tr>'+
-                    '<tr><td>total dam count</td><td>'+data['max_dam_id']+'</td></tr>' +
-                    '<tr><td>session_uuid</td><td>'+session_uuid+'</td></tr>' +
-                    '</table>');
-                $.each(
-                    data['polygons_to_update'],
-                    function(polygon_id, state) {
-                        if (!(polygon_id in status_polygons)) {
-                            var rect = L.rectangle(
-                                state['bounds'],
-                                {
-                                    color: state['color'],
-                                    weight: state['weight'],
-                                    fill: state['fill'] == 'true',
-                                    fillOpacity: 0.6,
-                                }).addTo(
-                                    processing_layer);
-                            status_polygons[polygon_id] = rect;
-                        } else {
-                            status_polygons[polygon_id].setStyle({
-                                color: state['color']
-                            });
-                        }
-                    });
-                last_known_dam_id = data['max_dam_id'];
-                if data['all_sent'] == 'false' {
-                    update_processing_status();
-                }
-            }
-        }).fail(function(data) {
-            $('#status').html('error: ' + JSON.stringify(data));
-        }).always(function() {
-            setTimeout(update_processing_status, 2500);
-        });
+            }).fail(function(data) {
+                $('#status').html('error: ' + JSON.stringify(data));
+            }).always(function() {
+                setTimeout(update_processing_status, 2500);
+            });
+        }
     };
     update_processing_status();
 
