@@ -200,7 +200,7 @@ def processing_status():
             "SELECT dam_id, pre_known, lat_min, lng_min, lat_max, lng_max "
             "FROM identified_dams "
             "WHERE dam_id>? "
-            "ORDER BY dam_id ",
+            "ORDER BY dam_id "
             "LIMIT %d" % QUERY_LIMIT, (last_known_dam_id,))
         dam_count = 0
         for dam_id, pre_known, lat_min, lng_min, lat_max, lng_max in cursor:
