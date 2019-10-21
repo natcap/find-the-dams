@@ -115,6 +115,7 @@ ACTIVE_MOSAIC_JSON_PATH = os.path.join(WORKSPACE_DIR, 'active_mosaic.json')
 REQUEST_TIMEOUT = 5
 FRAGMENT_SIZE = (419, 419)  # dims to fragment a Planet quad
 THRESHOLD_LEVEL = 0.08
+QUERY_LIMIT = 1000  # how many dams to fetch at a time on the app
 DETECTOR_POLL_TIME = 3  # seconds to wait between detector complete checks
 GLOBAL_HOST_SET = None
 GLOBAL_HOST_QUEUE = None
@@ -198,8 +199,12 @@ def processing_status():
         cursor.execute(
             "SELECT dam_id, pre_known, lat_min, lng_min, lat_max, lng_max "
             "FROM identified_dams "
-            "WHERE dam_id>?", (last_known_dam_id,))
+            "WHERE dam_id>? "
+            "ORDER BY dam_id ",
+            "LIMIT %d" % QUERY_LIMIT, (last_known_dam_id,))
+        dam_count = 0
         for dam_id, pre_known, lat_min, lng_min, lat_max, lng_max in cursor:
+            dam_count += 1
             polygons_to_update[dam_id] = {
                 'color': (
                     DAM_STATE_COLOR['pre_known'] if pre_known == int(1)
@@ -221,6 +226,7 @@ def processing_status():
             'max_dam_id': max_dam_id,
             'polygons_to_update': polygons_to_update,
             'session_uuid': SESSION_UUID,
+            'all_sent': 'true' if dam_count < QUERY_LIMIT else 'false',
         }
         cursor.close()
         connection.commit()
