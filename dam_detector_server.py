@@ -203,8 +203,10 @@ def processing_status():
             "ORDER BY dam_id "
             "LIMIT %d" % QUERY_LIMIT, (last_known_dam_id,))
         dam_count = 0
+        max_dam_id = -1
         for dam_id, pre_known, lat_min, lng_min, lat_max, lng_max in cursor:
             dam_count += 1
+            max_dam_id = max(max_dam_id, dam_id)
             polygons_to_update[dam_id] = {
                 'color': (
                     DAM_STATE_COLOR['pre_known'] if pre_known == int(1)
@@ -215,14 +217,6 @@ def processing_status():
                 'fill': 'false',
                 'weight': 1,
             }
-
-        # count how many polygons just for reference
-        cursor.execute(
-            'SELECT max(cast(dam_id as integer)) from identified_dams')
-        (max_dam_id,) = cursor.fetchone()
-        # construct final payload
-        LOGGER.debug('dam count: %d', dam_count)
-        time.sleep(0.25)
         payload = {
             'query_time': str(datetime.datetime.now()),
             'max_dam_id': max_dam_id,
