@@ -221,6 +221,8 @@ def processing_status():
             'SELECT max(cast(dam_id as integer)) from identified_dams')
         (max_dam_id,) = cursor.fetchone()
         # construct final payload
+        LOGGER.debug('dam count: %d', dam_count)
+        time.sleep(0.25)
         payload = {
             'query_time': str(datetime.datetime.now()),
             'max_dam_id': max_dam_id,
