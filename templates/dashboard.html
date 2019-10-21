@@ -140,7 +140,7 @@
                         }
                     });
                 last_known_dam_id = data['max_dam_id'];
-                if (data['all_sent'] == 'true') {
+                if (data['all_sent'] == 'false') {
                     // fetch the next one as fast as possible
                     setTimeout(update_processing_status, 1);
                 } else {
