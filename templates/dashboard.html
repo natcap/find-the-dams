@@ -140,8 +140,9 @@
                         }
                     });
                 last_known_dam_id = data['max_dam_id'];
-                if data['all_sent'] == 'false':
+                if data['all_sent'] == 'false' {
                     update_processing_status();
+                }
             }
         }).fail(function(data) {
             $('#status').html('error: ' + JSON.stringify(data));
