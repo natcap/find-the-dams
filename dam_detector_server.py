@@ -206,7 +206,7 @@ def processing_status():
         max_dam_id = -1
         for dam_id, pre_known, lat_min, lng_min, lat_max, lng_max in cursor:
             dam_count += 1
-            max_dam_id = max(max_dam_id, dam_id)
+            max_dam_id = max(max_dam_id, int(dam_id))
             polygons_to_update[dam_id] = {
                 'color': (
                     DAM_STATE_COLOR['pre_known'] if pre_known == int(1)
