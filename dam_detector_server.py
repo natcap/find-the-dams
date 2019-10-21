@@ -204,7 +204,7 @@ def processing_status():
             "ORDER BY dam_id_n "
             "LIMIT %d" % QUERY_LIMIT, (last_known_dam_id,))
         dam_count = 0
-        max_dam_id = -1
+        max_dam_id = last_known_dam_id
         for dam_id, pre_known, lat_min, lng_min, lat_max, lng_max in cursor:
             dam_count += 1
             max_dam_id = max(max_dam_id, int(dam_id))
