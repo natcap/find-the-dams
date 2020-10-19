@@ -89,7 +89,6 @@ import shapely.prepared
 import shapely.strtree
 import shapely.wkb
 import taskgraph
-import tensorflow as tf
 
 
 logging.basicConfig(
@@ -104,7 +103,6 @@ WORLD_BORDERS_VECTOR_PATH = 'world_borders.gpkg'
 LOGGER = logging.getLogger(__name__)
 
 WORKSPACE_DIR = 'workspace'
-DAM_IMAGE_WORKSPACE = os.path.join(WORKSPACE_DIR, 'identified_dam_imagery')
 DATABASE_PATH = os.path.join(WORKSPACE_DIR, 'natgeo_dams_database.db')
 INITALIZE_DATABASE_TOKEN_PATH = os.path.join(
     WORKSPACE_DIR, 'initalize_spatial_search_units.COMPLETE')
