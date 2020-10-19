@@ -565,7 +565,7 @@ def do_detection(
 
 def main():
     """Entry point."""
-    for dirname in [WORKSPACE_DIR, DAM_IMAGE_WORKSPACE]:
+    for dirname in [WORKSPACE_DIR,]:
         try:
             os.makedirs(dirname)
         except OSError:
