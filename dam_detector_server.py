@@ -570,7 +570,7 @@ def main():
 
     unprocessed_quads = _execute_sqlite(
         '''
-        SELECT lng_min, lat_min, lng_max, lat_max
+        SELECT grid_id, lng_min, lat_min, lng_max, lat_max
         FROM work_status
         WHERE processed=0
         ''', DATABASE_PATH, fetch='all')
