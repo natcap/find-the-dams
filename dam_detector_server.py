@@ -573,7 +573,7 @@ def main():
         SELECT lng_min, lat_min, lng_max, lat_max
         FROM work_status
         WHERE processed=0
-        ''', DATABASE_PATH)
+        ''', DATABASE_PATH, fetch='all')
 
     LOGGER.debug(unprocessed_quads)
     return
