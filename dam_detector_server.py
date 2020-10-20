@@ -103,10 +103,7 @@ WORLD_BORDERS_VECTOR_PATH = 'world_borders.gpkg'
 LOGGER = logging.getLogger(__name__)
 
 WORKSPACE_DIR = 'workspace'
-DATABASE_PATH = os.path.join(WORKSPACE_DIR, 'natgeo_dams_database.db')
-INITALIZE_DATABASE_TOKEN_PATH = os.path.join(
-    WORKSPACE_DIR, 'initalize_spatial_search_units.COMPLETE')
-ACTIVE_MOSAIC_JSON_PATH = os.path.join(WORKSPACE_DIR, 'active_mosaic.json')
+DATABASE_PATH = os.path.join(WORKSPACE_DIR, 'natgeo_dams_database_2020_07_01.db')
 REQUEST_TIMEOUT = 5
 FRAGMENT_SIZE = (419, 419)  # dims to fragment a Planet quad
 THRESHOLD_LEVEL = 0.08
