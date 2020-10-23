@@ -220,7 +220,6 @@ def main():
         except OSError:
             pass
 
-    work_queue = queue.Queue()
     unprocessed_grids = _execute_sqlite(
         '''
         SELECT grid_id, lng_min, lat_min, lng_max, lat_max
@@ -228,24 +227,22 @@ def main():
         WHERE processed=0
         ''', DATABASE_PATH, fetch='all')
 
-    for grid in unprocessed_grids:
-        work_queue.put(grid)
-
-    LOGGER.debug('grids sent to work queue')
-
-    # TODO: monitor for new or dead hosts
-    #   TODO: manage new hosts with a new thread
-
+    # monitor for new or dead hosts
     client_monitor_thread = threading.Thread(
         target=client_monitor,
-        args=(DAM_INFERENCE_WORKER_KEY, work_queue))
+        args=(DAM_INFERENCE_WORKER_KEY,))
     client_monitor_thread.daemon = True
     client_monitor_thread.start()
-    client_monitor_thread.join()
 
-    work_queue.put('STOP')
+    # schedule work
+    work_list = list(unprocessed_grids)
+    work_manager_thread = threading.Thread(
+        target=work_manager,
+        args=(work_list,))
+    work_manager_thread.start()
+    work_manager_thread.join()
+
     return
-
     APP.run(host='0.0.0.0', port=80)
 
 
@@ -268,6 +265,11 @@ class Worker(object):
         """Worker is uniquely identified by id, but IP is useful too."""
         return f'Worker: {self.worker_ip}({self.id})'
 
+    def failed(self):
+        """Return True if job failed."""
+        raise RuntimeError('# TODO: implement failed')
+        return False
+
     def send_job(self, job_payload):
         """Send a job to the worker."""
         self.active = True
@@ -280,12 +282,17 @@ class Worker(object):
             raise RuntimeError(
                 f'Worker {self.worker_ip} tested but is not active.')
 
+    def get_result(self):
+        """Return result if complete."""
+        raise RuntimeError('# TODO: implement send_job')
 
-def work_manager(work_queue):
+
+def work_manager(work_list):
     """Manager to record and schedule work.
 
     Args:
-        work_queue (queue): work to pass to available clients.
+        work_list (list): work to pass to available clients, it is expected to
+            consume this list.
 
     Returns:
         None.
@@ -303,10 +310,8 @@ def work_manager(work_queue):
                     available_workers.add(global_worker)
 
             # Schedule any available work to the workers
-            while available_workers:
-                payload = work_queue.get()
-                if payload == 'STOP':
-                    break
+            while available_workers and work_list:
+                payload = work_list.pop()
                 free_worker = available_workers.pop()
                 free_worker.send_job(payload)
                 worker_to_payload_map[free_worker] = payload
@@ -318,7 +323,7 @@ def work_manager(work_queue):
                 scheduled_worker, payload = worker_to_payload_map.popitem()
                 if scheduled_worker.failed():
                     LOGGER.error(f'{scheduled_worker} failed on job {payload}')
-                    work_queue.put(payload)
+                    work_list.push(payload)
                 elif scheduled_worker.job_complete():
                     # If job is complete, process result and put the
                     # free worker back in the free worker pool
