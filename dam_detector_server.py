@@ -7,7 +7,6 @@ import logging
 import os
 import pathlib
 import queue
-import shutil
 import sqlite3
 import subprocess
 import sys
@@ -17,20 +16,8 @@ import traceback
 import uuid
 
 from flask import Flask
-from osgeo import gdal
-from osgeo import ogr
-from osgeo import osr
 import flask
-import numpy
-import PIL
-import PIL.ImageDraw
-import pygeoprocessing
-import requests
 import retrying
-import shapely.geometry
-import shapely.ops
-import shapely.prepared
-import shapely.strtree
 
 
 logging.basicConfig(
@@ -46,18 +33,6 @@ LOGGER = logging.getLogger(__name__)
 
 WORKSPACE_DIR = 'workspace'
 DATABASE_PATH = os.path.join(WORKSPACE_DIR, 'natgeo_dams_database_2020_07_01.db')
-REQUEST_TIMEOUT = 5
-FRAGMENT_SIZE = (419, 419)  # dims to fragment a Planet quad
-THRESHOLD_LEVEL = 0.08
-QUERY_LIMIT = 20000  # how many dams to fetch at a time on the app
-DETECTOR_POLL_TIME = 3  # seconds to wait between detector complete checks
-GLOBAL_HOST_SET = None
-GLOBAL_HOST_QUEUE = None
-DATABASE_STATUS_STR = None
-HOST_FILE_PATH = None
-GLOBAL_LOCK = None
-WORKING_GRID_ID_STATUS_MAP = None
-FRAGMENT_ID_STATUS_MAP = None
 SESSION_UUID = None
 STATE_TO_COLOR = {
     'unscheduled': '#333333',
@@ -71,6 +46,8 @@ DAM_STATE_COLOR = {
     'identified': '#33FF00',
     'pre_known': '#0000F0',
 }
+
+DAM_INFERENCE_WORKER_KEY = 'dam_inference_worker'
 
 APP = Flask(__name__, static_url_path='', static_folder='')
 
@@ -237,7 +214,7 @@ def _execute_sqlite(
 
 def main():
     """Entry point."""
-    for dirname in [WORKSPACE_DIR,]:
+    for dirname in [WORKSPACE_DIR]:
         try:
             os.makedirs(dirname)
         except OSError:
@@ -261,109 +238,146 @@ def main():
 
     client_monitor_thread = threading.Thread(
         target=client_monitor,
-        args=('key', work_queue))
+        args=(DAM_INFERENCE_WORKER_KEY, work_queue))
     client_monitor_thread.daemon = True
     client_monitor_thread.start()
-
     client_monitor_thread.join()
 
+    work_queue.put('STOP')
     return
 
     APP.run(host='0.0.0.0', port=80)
 
 
-def client_monitor(client_key):
+class Worker(object):
+    """Manages the state of a worker."""
+    __next_id = 0
+
+    def __init__(self, worker_ip):
+        """Define worker_ip to send work to."""
+        self.worker_ip = worker_ip
+        self.active = False
+        self.id = Worker.__next_id
+        Worker.__next_id += 1
+
+    def __eq__(self, other):
+        """Two workers are equal if they have the same id."""
+        return self.worker_ip == other.worker_ip
+
+    def __repr__(self):
+        """Worker is uniquely identified by id, but IP is useful too."""
+        return f'Worker: {self.worker_ip}({self.id})'
+
+    def send_job(self, job_payload):
+        """Send a job to the worker."""
+        self.active = True
+        raise RuntimeError('# TODO: implement send_job')
+
+    def job_complete(self):
+        """Return True if job complete, raise exception if it failed."""
+        raise RuntimeError('# TODO: implement job_complete')
+        if not self.active:
+            raise RuntimeError(
+                f'Worker {self.worker_ip} tested but is not active.')
+
+
+def work_manager(work_queue):
+    """Manager to record and schedule work.
+
+    Args:
+        work_queue (queue): work to pass to available clients.
+
+    Returns:
+        None.
+    """
+    available_workers = set()
+    worker_to_payload_map = dict()
+    try:
+        while True:
+            # Keep the aCheck if there are new workers to add to availble worker set
+            local_global_workers = list(GLOBAL_WORKERS)
+            while local_global_workers:
+                global_worker = local_global_workers.pop()
+                if (global_worker not in available_workers and
+                        global_worker not in worker_to_payload_map):
+                    available_workers.add(global_worker)
+
+            # Schedule any available work to the workers
+            while available_workers:
+                payload = work_queue.get()
+                if payload == 'STOP':
+                    break
+                free_worker = available_workers.pop()
+                free_worker.send_job(payload)
+                worker_to_payload_map[free_worker] = payload
+
+            # This loop checks if any of the workers are done, processes that
+            # work and puts the free workers back on the free queue
+            worker_to_payload_map_swap = dict()
+            while worker_to_payload_map:
+                scheduled_worker, payload = worker_to_payload_map.popitem()
+                if scheduled_worker.failed():
+                    LOGGER.error(f'{scheduled_worker} failed on job {payload}')
+                    work_queue.put(payload)
+                elif scheduled_worker.job_complete():
+                    # If job is complete, process result and put the
+                    # free worker back in the free worker pool
+                    result = scheduled_worker.get_result()
+                    # TODO: process result
+                else:
+                    worker_to_payload_map_swap[scheduled_worker] = payload
+            worker_to_payload_map = worker_to_payload_map_swap
+
+            if payload == 'STOP' and len(worker_to_payload_map) == 0:
+                LOGGER.info('all done with work')
+                return
+
+    except Exception:
+        LOGGER.exception('work manager failed')
+
+
+def client_monitor(client_key, update_interval=5.0):
     """Watch for new clients and add them to the worker set.
 
     Args:
         client_key (str): filter on that key.
+        update_interval (float): update interval to check for new instances
 
     Returns:
         Never.
     """
-    worker_set = set()
     try:
         while True:
+            start_time = time.time()
             LOGGER.debug('checking for compute instances')
             result = subprocess.run(
-                'gcloud compute instances list --filter="labels=value" '
+                'gcloud compute instances list '
+                '--filter="labels=value AND status=RUNNING" '
                 '--format=json', capture_output=True, shell=True).stdout
-            result_ip_set = set()
+            live_workers = set()
             for instance in json.loads(result):
-                LOGGER.debug(instance)
                 network_ip = instance['networkInterfaces'][0]['networkIP']
-                LOGGER.debug(
-                    f"{instance['name']} {network_ip}")
-                result_ip_set.add(network_ip)
-            new_ip_set = result_ip_set - worker_set
-            removed_ip_set = worker_set - result_ip_set
-            worker_set = result_ip_set
-            LOGGER.debug(
-                f'new ip set: {new_ip_set}, '
-                f'removed_ip_set: {removed_ip_set}, '
-                f'worker_set: {worker_set}')
-            time.sleep(5)
+                LOGGER.debug(f"{instance['name']} {network_ip}")
+                live_workers.add(Worker(network_ip))
+
+            # rather than clear the set and reset it, we construct the set
+            # by removing missing elements and adding new ones. this way we
+            # don't get a glitch where a worker looks like it's missing because
+            # the set is getting reset
+            new_workers = live_workers - GLOBAL_WORKERS
+            # Remove any clients that are missing
+            GLOBAL_WORKERS.intersection_update(live_workers)
+            # Add in any clients that are new
+            GLOBAL_WORKERS.update(new_workers)
+            LOGGER.debug(f'GLOBAL_WORKERS: {GLOBAL_WORKERS}')
+            time.sleep(max(update_interval - (time.time() - start_time), 0))
     except Exception:
         LOGGER.exception('client monitor failed')
-
-
-def host_file_monitor():
-    """Watch inference_host_file_path & update inference_worker_host_queue.
-
-    Parameters:
-        inference_host_file_path (str): path to a file that contains lines
-            of http://[host]:[port]<?label> that can be used to send inference
-            work to. <label> can be used to use the same machine more than
-            once.
-        inference_worker_host_queue (queue.Queue): new hosts are queued here
-            so they can be pulled by other workers later.
-        inference_worker_work_queue
-
-
-    """
-    last_modified_time = 0
-    worker_id = -1
-    while True:
-        try:
-            current_modified_time = os.path.getmtime(inference_host_file_path)
-            if current_modified_time != last_modified_time:
-                last_modified_time = current_modified_time
-                with open(inference_host_file_path, 'r') as ip_file:
-                    ip_file_contents = ip_file.readlines()
-                with GLOBAL_LOCK:
-                    global GLOBAL_HOST_SET
-                    old_host_set = GLOBAL_HOST_SET
-                    GLOBAL_HOST_SET = set([
-                        line.strip() for line in ip_file_contents
-                        if line.startswith('http')])
-                    new_hosts = GLOBAL_HOST_SET.difference(old_host_set)
-                    for new_host in new_hosts:
-                        inference_worker_host_queue.put(new_host)
-                    n_hosts = len(new_hosts)
-                for _ in range(n_hosts):
-                    worker_id += 1
-                    LOGGER.info(
-                        'starting new inference_worker host %d', worker_id)
-                    inference_worker_thread = threading.Thread(
-                        target=inference_worker,
-                        args=(inference_worker_work_queue,
-                              inference_worker_host_queue,
-                              DATABASE_PATH, worker_id))
-                    inference_worker_thread.start()
-            time.sleep(DETECTOR_POLL_TIME)
-        except Exception:
-            LOGGER.exception('exception in `host_file_monitor`')
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description='Start dam detection server.')
     args = parser.parse_args()
-
-    GLOBAL_LOCK = threading.Lock()
-    GLOBAL_HOST_SET = set()
-    GLOBAL_HOST_QUEUE = set()
-    WORKING_GRID_ID_STATUS_MAP = {}
-    FRAGMENT_ID_STATUS_MAP = {}
-    SESSION_UUID = uuid.uuid4().hex
+    GLOBAL_WORKERS = set()
     main()
