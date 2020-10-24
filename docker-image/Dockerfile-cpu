@@ -10,11 +10,11 @@ RUN apt-get update \
 
 COPY natgeo_dams_model_resnet50_csv_64.h5 /usr/local/workspace/
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.txt /usr/local/workspace/
+RUN pip3 install --no-cache-dir -r /usr/local/workspace/requirements.txt
 
 COPY tensorflow_inference_server.py /usr/local/workspace/
 WORKDIR /usr/local/workspace
-ENTRYPOINT [
-    "python3", "tensorflow_inference_server.py",
+ENTRYPOINT [ \
+    "python3", "tensorflow_inference_server.py", \
     "natgeo_dams_model_resnet50_csv_64.h5"]
