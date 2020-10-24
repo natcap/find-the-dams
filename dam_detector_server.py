@@ -6,7 +6,6 @@ import json
 import logging
 import os
 import pathlib
-import queue
 import sqlite3
 import subprocess
 import sys
@@ -16,6 +15,7 @@ import traceback
 import uuid
 
 from flask import Flask
+from osgeo import gdal
 import flask
 import retrying
 
@@ -28,7 +28,7 @@ logging.basicConfig(
     stream=sys.stdout)
 logging.getLogger('taskgraph').setLevel(logging.INFO)
 
-WORLD_BORDERS_VECTOR_PATH = 'world_borders.gpkg'
+QUADS_TO_PROCESS_PATH = 'quads_to_process.gpkg'
 LOGGER = logging.getLogger(__name__)
 
 WORKSPACE_DIR = 'workspace'
@@ -147,7 +147,7 @@ def processing_status():
 @retrying.retry(wait_exponential_multiplier=100, wait_exponential_max=1000)
 def _execute_sqlite(
         sqlite_command, database_path,
-        argument_list=None, mode='read_only', execute='execute', fetch=None):
+        argument_list=None, execute='execute', fetch=None):
     """Execute SQLite command and attempt retries on a failure.
 
     Args:
@@ -220,13 +220,6 @@ def main():
         except OSError:
             pass
 
-    unprocessed_grids = _execute_sqlite(
-        '''
-        SELECT grid_id, lng_min, lat_min, lng_max, lat_max
-        FROM work_status
-        WHERE processed=0
-        ''', DATABASE_PATH, fetch='all')
-
     # monitor for new or dead hosts
     client_monitor_thread = threading.Thread(
         target=client_monitor,
@@ -235,10 +228,9 @@ def main():
     client_monitor_thread.start()
 
     # schedule work
-    work_list = list(unprocessed_grids)
     work_manager_thread = threading.Thread(
         target=work_manager,
-        args=(work_list,))
+        args=(QUADS_TO_PROCESS_PATH,))
     work_manager_thread.start()
     work_manager_thread.join()
 
@@ -287,21 +279,34 @@ class Worker(object):
         raise RuntimeError('# TODO: implement send_job')
 
 
-def work_manager(work_list):
+def work_manager(quad_vector_path):
     """Manager to record and schedule work.
 
     Args:
-        work_list (list): work to pass to available clients, it is expected to
-            consume this list.
+        quad_vector_path (str): path to vector containing quads with uri fields
+            and processed fields. Do work on 'processed=0' fields then set
+            to 1 when 'uri' is processed.
 
     Returns:
         None.
     """
     available_workers = set()
     worker_to_payload_map = dict()
+
+    # load quads to process to get fid & uri field
+    unprocessed_fid_uri_list = []
+    quad_vector = gdal.OpenEx(quad_vector_path, gdal.OF_VECTOR)
+    quad_layer = quad_vector.GetLayer()
+    quad_layer.SetAttributeFilter('processed=0')
+    LOGGER.info('building work list')
+    for quad_feature in quad_layer:
+        fid = quad_feature.GetFID()
+        quad_uri = quad_feature.GetField('quad_uri')
+        unprocessed_fid_uri_list.append((fid, quad_uri))
+    LOGGER.info(f'{len(unprocessed_fid_uri_list)} quads to process')
+
     try:
         while True:
-            # Keep the aCheck if there are new workers to add to availble worker set
             local_global_workers = list(GLOBAL_WORKERS)
             while local_global_workers:
                 global_worker = local_global_workers.pop()
@@ -310,8 +315,8 @@ def work_manager(work_list):
                     available_workers.add(global_worker)
 
             # Schedule any available work to the workers
-            while available_workers and work_list:
-                payload = work_list.pop()
+            while available_workers and unprocessed_fid_uri_list:
+                payload = unprocessed_fid_uri_list.pop()
                 free_worker = available_workers.pop()
                 free_worker.send_job(payload)
                 worker_to_payload_map[free_worker] = payload
@@ -323,12 +328,12 @@ def work_manager(work_list):
                 scheduled_worker, payload = worker_to_payload_map.popitem()
                 if scheduled_worker.failed():
                     LOGGER.error(f'{scheduled_worker} failed on job {payload}')
-                    work_list.push(payload)
+                    unprocessed_fid_uri_list.append(payload)
                 elif scheduled_worker.job_complete():
                     # If job is complete, process result and put the
                     # free worker back in the free worker pool
                     result = scheduled_worker.get_result()
-                    # TODO: process result
+                    # TODO: process result by updating database and updating quad to process vector
                 else:
                     worker_to_payload_map_swap[scheduled_worker] = payload
             worker_to_payload_map = worker_to_payload_map_swap
@@ -357,7 +362,7 @@ def client_monitor(client_key, update_interval=5.0):
             LOGGER.debug('checking for compute instances')
             result = subprocess.run(
                 'gcloud compute instances list '
-                '--filter="labels=value AND status=RUNNING" '
+                f'--filter="labels={client_key} AND status=RUNNING" '
                 '--format=json', capture_output=True, shell=True).stdout
             live_workers = set()
             for instance in json.loads(result):
