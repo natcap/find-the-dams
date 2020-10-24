@@ -1,7 +1,6 @@
 # coding=UTF-8
 """This server will manage a worker cloud."""
 import argparse
-import datetime
 import json
 import logging
 import os
@@ -12,7 +11,6 @@ import sys
 import threading
 import time
 import traceback
-import uuid
 
 from flask import Flask
 from osgeo import gdal
@@ -33,19 +31,6 @@ LOGGER = logging.getLogger(__name__)
 
 WORKSPACE_DIR = 'workspace'
 DATABASE_PATH = os.path.join(WORKSPACE_DIR, 'natgeo_dams_database_2020_07_01.db')
-SESSION_UUID = None
-STATE_TO_COLOR = {
-    'unscheduled': '#333333',
-    'scheduled': '#FF3333',
-    'downloaded': '#FF6600',
-    'analyzing': '#6666FF',
-    'complete': '#00FF33',
-}
-
-DAM_STATE_COLOR = {
-    'identified': '#33FF00',
-    'pre_known': '#0000F0',
-}
 
 DAM_INFERENCE_WORKER_KEY = 'dam_inference_worker'
 
@@ -60,85 +45,14 @@ def favicon():
         mimetype='image/vnd.microsoft.icon')
 
 
-@APP.route('/')
-def index():
-    """Flask entry point."""
-    return flask.render_template(
-        'dashboard.html', **{
-            'message': 'Stats will go here.',
-        })
-
-
-@APP.route('/processing_status/', methods=['POST'])
+@APP.route('/get_status/', methods=['POST'])
 @retrying.retry(
     wait_exponential_multiplier=1000, wait_exponential_max=10000,
     stop_max_attempt_number=5)
 def processing_status():
     """Return results about polygons that are processing."""
     try:
-        last_known_dam_id = int(flask.request.form.get('last_known_dam_id'))
-        payload = None
-        polygons_to_update = {}
-        LOGGER.debug(flask.request.form)
-        database_uri = 'file:%s?mode=ro' % DATABASE_PATH
-        connection = sqlite3.connect(database_uri, uri=True)
-        cursor = connection.cursor()
-
-        # fetch all grids
-        cursor.execute(
-            "SELECT grid_id, processing_state, lat_min, lng_min, lat_max, "
-            "lng_max FROM work_status")
-
-        # construct a return object that indicated which polygons should be
-        # updated on the client
-
-        polygons_to_update = {
-            'grid_%s' % grid_id: {
-                'bounds': [[lat_min, lng_min], [lat_max, lng_max]],
-                'color': STATE_TO_COLOR[state],
-                'fill': 'true' if state == 'unscheduled' else 'false',
-                'weight': 1,
-            } for (
-                grid_id, state, lat_min, lng_min, lat_max, lng_max) in
-            cursor.fetchall()
-        }
-
-        with GLOBAL_LOCK:
-            for grid_id, fragment_info in FRAGMENT_ID_STATUS_MAP.items():
-                polygons_to_update[grid_id] = fragment_info
-
-        cursor.execute(
-            "SELECT CAST(dam_id as INT) AS dam_id_n, pre_known, "
-            "   lat_min, lng_min, lat_max, lng_max "
-            "FROM detected_dams "
-            "WHERE dam_id_n>? "
-            "ORDER BY dam_id_n "
-            "LIMIT %d" % QUERY_LIMIT, (last_known_dam_id,))
-        dam_count = 0
-        max_dam_id = last_known_dam_id
-        for dam_id, pre_known, lat_min, lng_min, lat_max, lng_max in cursor:
-            dam_count += 1
-            max_dam_id = max(max_dam_id, int(dam_id))
-            polygons_to_update[dam_id] = {
-                'color': (
-                    DAM_STATE_COLOR['pre_known'] if pre_known == int(1)
-                    else DAM_STATE_COLOR['identified']),
-                'bounds': [
-                    [lat_min, lng_min],
-                    [lat_max, lng_max]],
-                'fill': 'false',
-                'weight': 1,
-            }
-        payload = {
-            'query_time': str(datetime.datetime.now()),
-            'max_dam_id': max_dam_id,
-            'polygons_to_update': polygons_to_update,
-            'session_uuid': SESSION_UUID,
-            'all_sent': 'true' if dam_count < QUERY_LIMIT else 'false',
-        }
-        cursor.close()
-        connection.commit()
-        return json.dumps(payload)
+        return 'unimplemented'
     except Exception:
         LOGGER.exception('encountered exception')
         return traceback.format_exc()
