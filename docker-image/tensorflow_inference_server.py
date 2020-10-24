@@ -637,14 +637,24 @@ def inference_worker(
         LOGGER.exception("Exception in inference_worker")
 
 
+# WORK_STATUS maps quad url to a 'idle', 'working', 'error', or list result
+# if complete
+QUAD_URL_TO_STATUS_MAP = dict()
+URL_TO_PROCESS_LIST = []
+
+
 @APP.route('/do_inference', methods=['POST'])
 def do_inference():
     """Run dam inference on the posted quad."""
     LOGGER.debug(flask.request.data)
     LOGGER.debug(flask.request.json)
-    payload = flask.request.json
-    LOGGER.info('fetch ' + payload["quad_url"])
-    return 'working'
+    quad_url = flask.request.json['quad_url']
+
+    if quad_url in QUAD_URL_TO_STATUS_MAP:
+        return quad_url + ' already scheduled', 500
+    QUAD_URL_TO_STATUS_MAP[quad_url] = 'scheduled'
+    URL_TO_PROCESS_LIST.append(quad_url)
+    return quad_url + ' is scheduled'
 
 
 @APP.route('/job_status', methods=['POST'])
@@ -654,20 +664,40 @@ def job_status():
     # 'working'
     # 'complete'
     # 'error'
-    payload = flask.request.json
-    LOGGER.info('fetch status of ' + payload['quad_url'])
-    return {'status': 'idle'}
+    quad_url = flask.request.json['quad_url']
+    LOGGER.info('fetch status of ' + quad_url)
+    status = QUAD_URL_TO_STATUS_MAP[quad_url]
+    # TODO: this is only for debugging to see if this works
+    status = [[-999, -999, -999, -999]]
+    QUAD_URL_TO_STATUS_MAP[quad_url] = status
+    if not isinstance(status, list):
+        return {'status': status}
+    else:
+        return {'status': 'complete'}
 
 
-@APP.route('/get_result', methods=['GET'])
+@APP.route('/get_result', methods=['POST'])
 def get_result():
     """Get the result for a given quad."""
-    payload = flask.request.json
-    LOGGER.info('get result for ' + payload['quad_url'])
-    return {
-        'quad_url': 'not implemented',
-        'dam_bounding_box_list': [(0, 0, 0, 0)]
-        }
+    delivered = False
+    try:
+        quad_url = flask.request.json['quad_url']
+        LOGGER.info('get result for ' + quad_url)
+        status = QUAD_URL_TO_STATUS_MAP[quad_url]
+        if isinstance(status, list):
+            delivered = True
+            return {
+                'quad_url': quad_url,
+                'dam_bounding_box_list': status
+                }
+        else:
+            return quad_url + ' not complete with status: ' + status, 500
+    except Exception as e:
+        LOGGER.exception('error on get result for ' + quad_url)
+        return str(e), 500
+    finally:
+        if delivered:
+            del QUAD_URL_TO_STATUS_MAP[quad_url]
 
 
 if __name__ == '__main__':
@@ -687,4 +717,3 @@ if __name__ == '__main__':
     # inference_thread.start()
     # garbage_collection_thread = threading.Thread(target=garbage_collection)
     # garbage_collection_thread.start()
-

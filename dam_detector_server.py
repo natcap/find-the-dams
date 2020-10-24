@@ -30,7 +30,7 @@ QUADS_TO_PROCESS_PATH = 'quads_to_process.gpkg'
 LOGGER = logging.getLogger(__name__)
 
 WORKSPACE_DIR = 'workspace'
-DATABASE_PATH = os.path.join(WORKSPACE_DIR, 'natgeo_dams_database_2020_07_01.db')
+DATABASE_PATH = os.path.join(WORKSPACE_DIR, 'test_natgeo_dams_database_2020_07_01.db')
 
 DAM_INFERENCE_WORKER_KEY = 'dam_inference_worker'
 
@@ -242,6 +242,7 @@ class Worker(object):
         response = requests.post(
             worker_rest_url, json={'quad_url': self.job_payload})
         if response:
+            LOGGER.debug(f'got {response.json()} for {self.job_payload}')
             return response.json()
         raise RuntimeError(f'bad response {response}')
 
@@ -288,8 +289,13 @@ def work_manager(quad_vector_path, update_interval=5.0):
             while available_workers and unprocessed_fid_uri_list:
                 payload = unprocessed_fid_uri_list.pop()
                 free_worker = available_workers.pop()
-                free_worker.send_job(payload[1])
-                worker_to_payload_map[free_worker] = payload
+                try:
+                    free_worker.send_job(payload[1])
+                    worker_to_payload_map[free_worker] = payload
+                except Exception:
+                    LOGGER.exception(
+                        f'unable to send job {payload[1]} to {free_worker}')
+                    unprocessed_fid_uri_list.append(payload)
 
             # This loop checks if any of the workers are done, processes that
             # work and puts the free workers back on the free queue
@@ -310,24 +316,24 @@ def work_manager(quad_vector_path, update_interval=5.0):
 
                     LOGGER.info(
                         f"Update {DATABASE_PATH} With Completed Quad "
-                        f"{payload['quad_uri']} "
+                        f"{payload['quad_url']} "
                         f"{payload['dam_bounding_box_list']}")
                     _execute_sqlite(
                         '''
                         INSERT INTO detected_dams
-                            (lng_min, lat_min, lng_max, lat_max)
-                        VALUES(?, ?, ?, ?);
+                            (lng_min, lat_min, lng_max, lat_max, probability, country_list, image_uri)
+                        VALUES(?, ?, ?, ?, -1, '', '');
                         ''', DATABASE_PATH,
                         argument_list=payload['dam_bounding_box_list'],
                         execute='many')
 
                     LOGGER.info(
-                        f"Update Planet Quad Vector {payload['quad_uri']}")
+                        f"Update Planet Quad Vector {payload['quad_url']}")
                     quad_vector = gdal.OpenEx(
                         quad_vector_path, gdal.OF_VECTOR | gdal.GA_Update)
                     quad_layer = quad_vector.GetLayer()
                     quad_feature = quad_layer.GetFeature(
-                        quad_url_to_fid[payload['quad_uri']])
+                        quad_url_to_fid[payload['quad_url']])
                     quad_feature.SetField('processed', 1)
                     quad_layer.SetFeature(quad_feature)
                     quad_feature = None
