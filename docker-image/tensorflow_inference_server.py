@@ -13,6 +13,7 @@ import logging
 import os
 import shutil
 import sys
+import threading
 import time
 import traceback
 import uuid
@@ -23,6 +24,7 @@ import numpy
 import PIL
 import PIL.ImageDraw
 import retrying
+import requests
 import shapely.geometry
 import tensorflow as tf
 
@@ -484,7 +486,7 @@ def do_detection(
         LOGGER.debug('done with %s', inference_worker_host_raw)
 
 
-def inference_worker(
+def old_inference_worker(
         inference_worker_work_queue, inference_worker_host_queue,
         database_path, worker_id):
     """Take large quads and search for dams.
@@ -641,6 +643,29 @@ def inference_worker(
 # if complete
 QUAD_URL_TO_STATUS_MAP = dict()
 URL_TO_PROCESS_LIST = []
+QUAD_AVAILBLE_EVENT = threading.Event()
+
+
+def do_inference_worker():
+    """Calculate inference on the next available URL."""
+    while True:
+        QUAD_AVAILBLE_EVENT.wait(5.0)
+        if not URL_TO_PROCESS_LIST:
+            continue
+        quad_url = URL_TO_PROCESS_LIST.pop()
+        QUAD_URL_TO_STATUS_MAP[quad_url] = 'processing'
+        LOGGER.info('downloading ' + quad_url)
+        quad_path = os.path.join('/', 'data', os.path.basename(quad_url))
+        with requests.get(quad_url, stream=True, timeout=5.0) as r:
+            with open(quad_path, 'wb') as f:
+                shutil.copyfileobj(r.raw, f)
+        # TODO: download the url
+        # TODO: cut it into pieces
+        # TODO: do inference on all the pieces
+        # TODO: store the result in QUAD_URL_TO_STATUS_MAP
+        # TODO: delete the quad
+        if len(URL_TO_PROCESS_LIST) == 0:
+            QUAD_AVAILBLE_EVENT.clear()
 
 
 @APP.route('/do_inference', methods=['POST'])
@@ -654,6 +679,7 @@ def do_inference():
         return quad_url + ' already scheduled', 500
     QUAD_URL_TO_STATUS_MAP[quad_url] = 'scheduled'
     URL_TO_PROCESS_LIST.append(quad_url)
+    QUAD_AVAILBLE_EVENT.set()
     return quad_url + ' is scheduled'
 
 
@@ -661,14 +687,12 @@ def do_inference():
 def job_status():
     """Report status of given job."""
     # 'idle'
-    # 'working'
+    # 'processing'
     # 'complete'
     # 'error'
     quad_url = flask.request.json['quad_url']
     LOGGER.info('fetch status of ' + quad_url)
     status = QUAD_URL_TO_STATUS_MAP[quad_url]
-    # TODO: this is only for debugging to see if this works
-    status = [[-999, -999, -999, -999]]
     QUAD_URL_TO_STATUS_MAP[quad_url] = status
     if not isinstance(status, list):
         return {'status': status}
@@ -707,6 +731,11 @@ if __name__ == '__main__':
         '--app_port', default=80, help='server port')
     args = parser.parse_args()
     LOGGER.info('loading ' + args.tensorflow_model_path)
+
+    do_inference_worker_thread = threading.Thread(
+        target=do_inference_worker)
+    do_inference_worker_thread.daemon = True
+    do_inference_worker_thread.start()
     APP.run(host='0.0.0.0', port=args.app_port)
 
     # SESSION_MANAGER_LOCK = threading.Lock()

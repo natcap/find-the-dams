@@ -161,7 +161,7 @@ class Worker(object):
         do_inference
         job_status
             'idle'
-            'working'
+            'processing'
             'complete'
             'error'
         get_result
@@ -225,7 +225,7 @@ class Worker(object):
         self.active = True
 
     def get_status(self):
-        """Return 'idle', 'working', 'complete', 'error'."""
+        """Return 'idle', 'processing', 'complete', 'error'."""
         if not self.active:
             raise RuntimeError(
                 f'Worker {self.worker_ip} tested but is not active.')
@@ -302,7 +302,11 @@ def work_manager(quad_vector_path, update_interval=5.0):
             worker_to_payload_map_swap = dict()
             while worker_to_payload_map:
                 scheduled_worker, payload = worker_to_payload_map.popitem()
-                status = scheduled_worker.get_status()
+                try:
+                    status = scheduled_worker.get_status()
+                except Exception:
+                    LOGGER.exception(f'{scheduled_worker} failed')
+                    status = 'failed'
                 if status == 'failed':
                     LOGGER.error(f'{scheduled_worker} failed on job {payload}')
                     unprocessed_fid_uri_list.append(payload)
