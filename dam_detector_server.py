@@ -176,13 +176,14 @@ class Worker(object):
     __next_id = 0
     __worker_set = dict()
 
-    def __new__(cls, worker_ip):
+    def __new__(cls, worker_ip, port=8080):
         """Construct new Worker or return reference to existing one.
 
         Args:
             cls (ClassType): Worker.
             worker_ip (str): IP address of worker. If this Worker has been
                 created before it will reference that worker.
+            port (int): which port to connect on
 
         Returns:
             New instance of Worker or in the case of existing IP a reference
@@ -193,6 +194,7 @@ class Worker(object):
 
         instance = super().__new__(cls)
         instance.worker_ip = worker_ip
+        instance.port = port
         instance.active = False
         instance.id = Worker.__next_id
         Worker.__next_id += 1
@@ -214,7 +216,7 @@ class Worker(object):
     def send_job(self, job_payload):
         """Send a job to the worker."""
         worker_rest_url = (
-            f'http://{self.worker_ip}/do_inference')
+            f'http://{self.worker_ip}:{self.port}/do_inference')
         self.job_payload = job_payload
         response = requests.post(
             worker_rest_url, json={'quad_url': self.job_payload})
@@ -228,7 +230,7 @@ class Worker(object):
             raise RuntimeError(
                 f'Worker {self.worker_ip} tested but is not active.')
         worker_rest_url = (
-            f'http://{self.worker_ip}/job_status')
+            f'http://{self.worker_ip}:{self.port}/job_status')
         response = requests.post(
             worker_rest_url, json={'quad_url': self.job_payload})
         return response.json()['status']
@@ -236,7 +238,7 @@ class Worker(object):
     def get_result(self):
         """Return result if complete."""
         worker_rest_url = (
-            'http://{self.worker_ip}/get_result')
+            f'http://{self.worker_ip}:{self.port}/get_result')
         response = requests.post(
             worker_rest_url, json={'quad_url': self.job_payload})
         if response:
@@ -332,7 +334,9 @@ def work_manager(quad_vector_path, update_interval=5.0):
                     quad_layer = None
                     quad_vector = None
                 else:
-                    LOGGER.info(f'status is {status}')
+                    LOGGER.info(
+                        f'status for {scheduled_worker} is {status} '
+                        f'({payload})')
                     worker_to_payload_map_swap[scheduled_worker] = payload
             # swap back any remaining workers
             worker_to_payload_map = worker_to_payload_map_swap
@@ -368,11 +372,11 @@ def client_monitor(client_key, update_interval=5.0, local_hosts=None):
                 '--format=json', capture_output=True, shell=True).stdout
             live_workers = set()
             if local_hosts is not None:
-                live_workers.update([Worker(host+':8080') for host in local_hosts])
+                live_workers.update([Worker(host) for host in local_hosts])
             for instance in json.loads(result):
                 network_ip = instance['networkInterfaces'][0]['networkIP']
                 LOGGER.debug(f"{instance['name']} {network_ip}")
-                live_workers.add(Worker(network_ip+':8080'))
+                live_workers.add(Worker(network_ip))
 
             # rather than clear the set and reset it, we construct the set
             # by removing missing elements and adding new ones. this way we
