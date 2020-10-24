@@ -137,7 +137,8 @@ def main():
     # monitor for new or dead hosts
     client_monitor_thread = threading.Thread(
         target=client_monitor,
-        args=(DAM_INFERENCE_WORKER_KEY,))
+        args=(DAM_INFERENCE_WORKER_KEY,),
+        kwargs={'local_hosts': {'localhost'}})
     client_monitor_thread.daemon = True
     client_monitor_thread.start()
 
@@ -145,6 +146,7 @@ def main():
     work_manager_thread = threading.Thread(
         target=work_manager,
         args=(QUADS_TO_PROCESS_PATH,))
+    work_manager_thread.daemon = True
     work_manager_thread.start()
     work_manager_thread.join()
 
@@ -212,9 +214,10 @@ class Worker(object):
     def send_job(self, job_payload):
         """Send a job to the worker."""
         worker_rest_url = (
-            f'http://{self.worker_ip}/api/v1/do_inference')
+            f'http://{self.worker_ip}/do_inference')
         self.job_payload = job_payload
-        response = requests.post(worker_rest_url, json=self.job_payload)
+        response = requests.post(
+            worker_rest_url, json={'quad_url': self.job_payload})
         if not response:
             raise RuntimeError(f'something went wrong {response}')
         self.active = True
@@ -225,21 +228,23 @@ class Worker(object):
             raise RuntimeError(
                 f'Worker {self.worker_ip} tested but is not active.')
         worker_rest_url = (
-            f'http://{self.worker_ip}/api/v1/job_status')
-        response = requests.post(worker_rest_url, json=self.job_payload)
+            f'http://{self.worker_ip}/job_status')
+        response = requests.post(
+            worker_rest_url, json={'quad_url': self.job_payload})
         return response.json()['status']
 
     def get_result(self):
         """Return result if complete."""
         worker_rest_url = (
-            'http://{self.worker_ip}/api/v1/get_result')
-        response = requests.post(worker_rest_url, json=self.job_payload)
+            'http://{self.worker_ip}/get_result')
+        response = requests.post(
+            worker_rest_url, json={'quad_url': self.job_payload})
         if response:
             return response.json()
         raise RuntimeError(f'bad response {response}')
 
 
-def work_manager(quad_vector_path):
+def work_manager(quad_vector_path, update_interval=5.0):
     """Manager to record and schedule work.
 
     Args:
@@ -269,6 +274,7 @@ def work_manager(quad_vector_path):
 
     try:
         while True:
+            start_time = time.time()
             local_global_workers = list(GLOBAL_WORKERS)
             while local_global_workers:
                 global_worker = local_global_workers.pop()
@@ -280,7 +286,7 @@ def work_manager(quad_vector_path):
             while available_workers and unprocessed_fid_uri_list:
                 payload = unprocessed_fid_uri_list.pop()
                 free_worker = available_workers.pop()
-                free_worker.send_job(payload)
+                free_worker.send_job(payload[1])
                 worker_to_payload_map[free_worker] = payload
 
             # This loop checks if any of the workers are done, processes that
@@ -288,10 +294,11 @@ def work_manager(quad_vector_path):
             worker_to_payload_map_swap = dict()
             while worker_to_payload_map:
                 scheduled_worker, payload = worker_to_payload_map.popitem()
-                if scheduled_worker.failed():
+                status = scheduled_worker.get_status()
+                if status == 'failed':
                     LOGGER.error(f'{scheduled_worker} failed on job {payload}')
                     unprocessed_fid_uri_list.append(payload)
-                elif scheduled_worker.job_complete():
+                elif status == 'complete':
                     # If job is complete, process result and put the
                     # free worker back in the free worker pool
                     payload = scheduled_worker.get_result()
@@ -301,7 +308,8 @@ def work_manager(quad_vector_path):
 
                     LOGGER.info(
                         f"Update {DATABASE_PATH} With Completed Quad "
-                        f"{payload['quad_uri']}")
+                        f"{payload['quad_uri']} "
+                        f"{payload['dam_bounding_box_list']}")
                     _execute_sqlite(
                         '''
                         INSERT INTO detected_dams
@@ -323,8 +331,8 @@ def work_manager(quad_vector_path):
                     quad_feature = None
                     quad_layer = None
                     quad_vector = None
-
                 else:
+                    LOGGER.info(f'status is {status}')
                     worker_to_payload_map_swap[scheduled_worker] = payload
             # swap back any remaining workers
             worker_to_payload_map = worker_to_payload_map_swap
@@ -334,11 +342,13 @@ def work_manager(quad_vector_path):
                 LOGGER.info('all done with work')
                 return
 
+            time.sleep(max(0, update_interval-(time.time()-start_time)))
+
     except Exception:
         LOGGER.exception('work manager failed')
 
 
-def client_monitor(client_key, update_interval=5.0):
+def client_monitor(client_key, update_interval=5.0, local_hosts=None):
     """Watch for new clients and add them to the worker set.
 
     Args:
@@ -357,10 +367,12 @@ def client_monitor(client_key, update_interval=5.0):
                 f'--filter="metadata.items.key={client_key} AND status=RUNNING" '
                 '--format=json', capture_output=True, shell=True).stdout
             live_workers = set()
+            if local_hosts is not None:
+                live_workers.update([Worker(host+':8080') for host in local_hosts])
             for instance in json.loads(result):
                 network_ip = instance['networkInterfaces'][0]['networkIP']
                 LOGGER.debug(f"{instance['name']} {network_ip}")
-                live_workers.add(Worker(network_ip))
+                live_workers.add(Worker(network_ip+':8080'))
 
             # rather than clear the set and reset it, we construct the set
             # by removing missing elements and adding new ones. this way we

@@ -7,12 +7,12 @@ Run like this:
         "python tensorflow_inference_server.py 8080"
 
 """
+import argparse
+import json
 import logging
 import os
-import queue
 import shutil
 import sys
-import threading
 import time
 import traceback
 import uuid
@@ -62,7 +62,6 @@ except OSError:
 
 # Configure Flask app and the logo upload folder
 APP.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-APP_PORT = int(sys.argv[2])
 
 # map session ids to current state
 # can be
@@ -638,15 +637,54 @@ def inference_worker(
         LOGGER.exception("Exception in inference_worker")
 
 
-if __name__ == '__main__':
-    print(APP.root_path)
-    SESSION_MANAGER_LOCK = threading.Lock()
-    WORK_QUEUE = queue.Queue()
-    inference_thread = threading.Thread(
-        target=inference_worker,
-        args=(TF_GRAPH_PATH, WORK_QUEUE))
-    inference_thread.start()
-    garbage_collection_thread = threading.Thread(target=garbage_collection)
-    garbage_collection_thread.start()
+@APP.route('/do_inference', methods=['POST'])
+def do_inference():
+    """Run dam inference on the posted quad."""
+    LOGGER.debug(flask.request.data)
+    LOGGER.debug(flask.request.json)
+    payload = flask.request.json
+    LOGGER.info('fetch ' + payload["quad_url"])
+    return 'working'
 
-    APP.run(host='0.0.0.0', port=APP_PORT)
+
+@APP.route('/job_status', methods=['POST'])
+def job_status():
+    """Report status of given job."""
+    # 'idle'
+    # 'working'
+    # 'complete'
+    # 'error'
+    payload = flask.request.json
+    LOGGER.info('fetch status of ' + payload['quad_url'])
+    return {'status': 'idle'}
+
+
+@APP.route('/get_result', methods=['GET'])
+def get_result():
+    """Get the result for a given quad."""
+    payload = flask.request.json
+    LOGGER.info('get result for ' + payload['quad_url'])
+    return {
+        'quad_url': 'not implemented',
+        'dam_bounding_box_list': [(0, 0, 0, 0)]
+        }
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Carbon edge model')
+    parser.add_argument('tensorflow_model_path', help='path to frozen model')
+    parser.add_argument(
+        '--app_port', default=80, help='server port')
+    args = parser.parse_args()
+    LOGGER.info('loading ' + args.tensorflow_model_path)
+    APP.run(host='0.0.0.0', port=args.app_port)
+
+    # SESSION_MANAGER_LOCK = threading.Lock()
+    # WORK_QUEUE = queue.Queue()
+    # inference_thread = threading.Thread(
+    #     target=inference_worker,
+    #     args=(TF_GRAPH_PATH, WORK_QUEUE))
+    # inference_thread.start()
+    # garbage_collection_thread = threading.Thread(target=garbage_collection)
+    # garbage_collection_thread.start()
+
