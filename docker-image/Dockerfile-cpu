@@ -8,15 +8,13 @@ RUN apt-get update \
     mercurial \
 && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir \
-    flask \
-    numpy \
-    pillow \
-    rtree \
-    scipy \
-    shapely
+COPY natgeo_dams_model_resnet50_csv_64.h5 /usr/local/workspace/
 
-COPY fasterRCNN_08-26-withnotadams.pb /var/models/fasterRCNN_08-26-withnotadams.pb
-COPY tensorflow_inference_server.py /workspace/tensorflow_inference_server.py
-WORKDIR /workspace
-ENTRYPOINT ["python3", "tensorflow_inference_server.py", "/var/models/fasterRCNN_08-26-withnotadams.pb"]
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY tensorflow_inference_server.py /usr/local/workspace/
+WORKDIR /usr/local/workspace
+ENTRYPOINT [
+    "python3", "tensorflow_inference_server.py",
+    "natgeo_dams_model_resnet50_csv_64.h5"]

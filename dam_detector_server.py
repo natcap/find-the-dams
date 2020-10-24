@@ -299,7 +299,6 @@ def work_manager(quad_vector_path):
                     # payload['dam_bounding_box_list']
                     #    [(lng_min, lat_min, lng_max, lat_max), ...]
 
-                    # Update Database
                     LOGGER.info(
                         f"Update {DATABASE_PATH} With Completed Quad "
                         f"{payload['quad_uri']}")
@@ -324,8 +323,10 @@ def work_manager(quad_vector_path):
                     quad_feature = None
                     quad_layer = None
                     quad_vector = None
+
                 else:
                     worker_to_payload_map_swap[scheduled_worker] = payload
+            # swap back any remaining workers
             worker_to_payload_map = worker_to_payload_map_swap
 
             if (len(unprocessed_fid_uri_list) == 0 and
