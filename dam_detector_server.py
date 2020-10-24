@@ -258,13 +258,30 @@ class Worker(object):
 
     """
     __next_id = 0
+    __worker_set = dict()
 
-    def __init__(self, worker_ip):
-        """Define worker_ip to send work to."""
-        self.worker_ip = worker_ip
-        self.active = False
-        self.id = Worker.__next_id
+    def __new__(cls, worker_ip):
+        """Construct new Worker or return reference to existing one.
+
+        Args:
+            cls (ClassType): Worker.
+            worker_ip (str): IP address of worker. If this Worker has been
+                created before it will reference that worker.
+
+        Returns:
+            New instance of Worker or in the case of existing IP a reference
+            to an existing worker.
+        """
+        if worker_ip in Worker.__worker_set:
+            return Worker.__worker_set[worker_ip]
+
+        instance = super().__new__(cls)
+        instance.worker_ip = worker_ip
+        instance.active = False
+        instance.id = Worker.__next_id
         Worker.__next_id += 1
+        Worker.__worker_set[worker_ip] = instance
+        return instance
 
     def __eq__(self, other):
         """Two workers are equal if they have the same id."""
@@ -281,7 +298,7 @@ class Worker(object):
     def send_job(self, job_payload):
         """Send a job to the worker."""
         worker_rest_url = (
-            'http://{self.worker_ip}/api/v1/do_inference')
+            f'http://{self.worker_ip}/api/v1/do_inference')
         self.job_payload = job_payload
         response = requests.post(worker_rest_url, json=self.job_payload)
         if not response:
@@ -294,7 +311,7 @@ class Worker(object):
             raise RuntimeError(
                 f'Worker {self.worker_ip} tested but is not active.')
         worker_rest_url = (
-            'http://{self.worker_ip}/api/v1/job_status')
+            f'http://{self.worker_ip}/api/v1/job_status')
         response = requests.post(worker_rest_url, json=self.job_payload)
         return response.json()['status']
 
@@ -438,6 +455,7 @@ def client_monitor(client_key, update_interval=5.0):
             # Remove any clients that are missing
             GLOBAL_WORKERS.intersection_update(live_workers)
             # Add in any clients that are new
+            LOGGER.debug(f'new workers: {new_workers}')
             GLOBAL_WORKERS.update(new_workers)
             LOGGER.debug(f'GLOBAL_WORKERS: {GLOBAL_WORKERS}')
             time.sleep(max(update_interval - (time.time() - start_time), 0))
