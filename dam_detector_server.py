@@ -253,6 +253,10 @@ class Worker(object):
         """Two workers are equal if they have the same id."""
         return self.worker_ip == other.worker_ip
 
+    def __hash__(self):
+        """Uniquely define a worker by its IP."""
+        return hash(self.worker_ip)
+
     def __repr__(self):
         """Worker is uniquely identified by id, but IP is useful too."""
         return f'Worker: {self.worker_ip}({self.id})'
@@ -338,7 +342,8 @@ def work_manager(quad_vector_path):
                     worker_to_payload_map_swap[scheduled_worker] = payload
             worker_to_payload_map = worker_to_payload_map_swap
 
-            if payload == 'STOP' and len(worker_to_payload_map) == 0:
+            if (len(unprocessed_fid_uri_list) == 0 and
+                    len(worker_to_payload_map) == 0):
                 LOGGER.info('all done with work')
                 return
 
@@ -362,7 +367,7 @@ def client_monitor(client_key, update_interval=5.0):
             LOGGER.debug('checking for compute instances')
             result = subprocess.run(
                 'gcloud compute instances list '
-                f'--filter="labels={client_key} AND status=RUNNING" '
+                f'--filter="metadata.items.key={client_key} AND status=RUNNING" '
                 '--format=json', capture_output=True, shell=True).stdout
             live_workers = set()
             for instance in json.loads(result):
