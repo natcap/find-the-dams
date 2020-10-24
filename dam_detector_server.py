@@ -18,7 +18,7 @@ from flask import Flask
 from osgeo import gdal
 import flask
 import retrying
-
+import requests
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -239,7 +239,24 @@ def main():
 
 
 class Worker(object):
-    """Manages the state of a worker."""
+    """Manages the state of a worker.
+
+    API Functions:
+        do_inference
+        job_status
+            'idle'
+            'working'
+            'complete'
+            'error'
+        get_result
+
+    API data keys:
+        'quad_url'
+        'dam_bounding_box_list'
+            [(lng_min, lat_min, lng_max, lat_max), ...]
+    '''
+
+    """
     __next_id = 0
 
     def __init__(self, worker_ip):
@@ -261,26 +278,34 @@ class Worker(object):
         """Worker is uniquely identified by id, but IP is useful too."""
         return f'Worker: {self.worker_ip}({self.id})'
 
-    def failed(self):
-        """Return True if job failed."""
-        raise RuntimeError('# TODO: implement failed')
-        return False
-
     def send_job(self, job_payload):
         """Send a job to the worker."""
+        worker_rest_url = (
+            'http://{self.worker_ip}/api/v1/do_inference')
+        self.job_payload = job_payload
+        response = requests.post(worker_rest_url, json=self.job_payload)
+        if not response:
+            raise RuntimeError(f'something went wrong {response}')
         self.active = True
-        raise RuntimeError('# TODO: implement send_job')
 
-    def job_complete(self):
-        """Return True if job complete, raise exception if it failed."""
-        raise RuntimeError('# TODO: implement job_complete')
+    def get_status(self):
+        """Return 'idle', 'working', 'complete', 'error'."""
         if not self.active:
             raise RuntimeError(
                 f'Worker {self.worker_ip} tested but is not active.')
+        worker_rest_url = (
+            'http://{self.worker_ip}/api/v1/job_status')
+        response = requests.post(worker_rest_url, json=self.job_payload)
+        return response.json()['status']
 
     def get_result(self):
         """Return result if complete."""
-        raise RuntimeError('# TODO: implement send_job')
+        worker_rest_url = (
+            'http://{self.worker_ip}/api/v1/get_result')
+        response = requests.post(worker_rest_url, json=self.job_payload)
+        if response:
+            return response.json()
+        raise RuntimeError(f'bad response {response}')
 
 
 def work_manager(quad_vector_path):
@@ -296,6 +321,7 @@ def work_manager(quad_vector_path):
     """
     available_workers = set()
     worker_to_payload_map = dict()
+    quad_url_to_fid = {}
 
     # load quads to process to get fid & uri field
     unprocessed_fid_uri_list = []
@@ -307,6 +333,7 @@ def work_manager(quad_vector_path):
         fid = quad_feature.GetFID()
         quad_uri = quad_feature.GetField('quad_uri')
         unprocessed_fid_uri_list.append((fid, quad_uri))
+        quad_url_to_fid[quad_uri] = fid
     LOGGER.info(f'{len(unprocessed_fid_uri_list)} quads to process')
 
     try:
@@ -336,8 +363,36 @@ def work_manager(quad_vector_path):
                 elif scheduled_worker.job_complete():
                     # If job is complete, process result and put the
                     # free worker back in the free worker pool
-                    result = scheduled_worker.get_result()
-                    # TODO: process result by updating database and updating quad to process vector
+                    payload = scheduled_worker.get_result()
+                    # payload['quad_url']
+                    # payload['dam_bounding_box_list']
+                    #    [(lng_min, lat_min, lng_max, lat_max), ...]
+
+                    # Update Database
+                    LOGGER.info(
+                        f"Update {DATABASE_PATH} With Completed Quad "
+                        f"{payload['quad_uri']}")
+                    _execute_sqlite(
+                        '''
+                        INSERT INTO detected_dams
+                            (lng_min, lat_min, lng_max, lat_max)
+                        VALUES(?, ?, ?, ?);
+                        ''', DATABASE_PATH,
+                        argument_list=payload['dam_bounding_box_list'],
+                        execute='many')
+
+                    LOGGER.info(
+                        f"Update Planet Quad Vector {payload['quad_uri']}")
+                    quad_vector = gdal.OpenEx(
+                        quad_vector_path, gdal.OF_VECTOR | gdal.GA_Update)
+                    quad_layer = quad_vector.GetLayer()
+                    quad_feature = quad_layer.GetFeature(
+                        quad_url_to_fid[payload['quad_uri']])
+                    quad_feature.SetField('processed', 1)
+                    quad_layer.SetFeature(quad_feature)
+                    quad_feature = None
+                    quad_layer = None
+                    quad_vector = None
                 else:
                     worker_to_payload_map_swap[scheduled_worker] = payload
             worker_to_payload_map = worker_to_payload_map_swap
