@@ -314,6 +314,8 @@ def work_manager(quad_vector_path, update_interval=5.0):
                     # If job is complete, process result and put the
                     # free worker back in the free worker pool
                     payload = scheduled_worker.get_result()
+                    LOGGER.debug(f'result: {payload}')
+                    continue
                     # payload['quad_url']
                     # payload['dam_bounding_box_list']
                     #    [(lng_min, lat_min, lng_max, lat_max), ...]

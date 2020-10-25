@@ -1,20 +1,31 @@
 # natcap/dam-inference-server-cpu:0.0.1
-FROM tensorflow/tensorflow:1.12.0-py3
+# FROM tensorflow/tensorflow:1.12.0-py3
+FROM therealspring/python-gdal:3.0.4
 
-RUN apt-get update \
-&& apt-get install -y \
-    build-essential \
-    libspatialindex-c4v5 \
-    mercurial \
-&& rm -rf /var/lib/apt/lists/*
+RUN apt-get update -qq && \
+    apt-get install -y \
+    emacs \
+    libspatialindex-dev \
+    python3-pip \
+    postgresql-client \
+    openssl \
+    curl \
+    git \
+    && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN pip3 install pygeoprocessing
 
 COPY natgeo_dams_model_resnet50_csv_64.h5 /usr/local/workspace/
+# RUN pip3 install --no-cache-dir https://github.com/evdcush/TensorFlow-wheels/releases/download/tf-1.12.0-py37-cpu-westmere/tensorflow-1.12.0-cp37-cp37m-linux_x86_64.whl
+ENTRYPOINT /bin/bash
 
-COPY requirements.txt /usr/local/workspace/
-RUN pip3 install --no-cache-dir -r /usr/local/workspace/requirements.txt
-
-COPY tensorflow_inference_server.py /usr/local/workspace/
-WORKDIR /usr/local/workspace
-ENTRYPOINT [ \
-    "python3", "tensorflow_inference_server.py", \
-    "natgeo_dams_model_resnet50_csv_64.h5"]
+# COPY requirements.txt /usr/local/workspace/
+# RUN pip3 install --no-cache-dir -r /usr/local/workspace/requirements.txt
+#
+# COPY tensorflow_inference_server.py /usr/local/workspace/
+# WORKDIR /usr/local/workspace
+# ENTRYPOINT [ \
+#     "python3", "tensorflow_inference_server.py", \
+#     "natgeo_dams_model_resnet50_csv_64.h5"]
+#

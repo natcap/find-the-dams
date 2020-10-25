@@ -8,7 +8,6 @@ Run like this:
 
 """
 import argparse
-import json
 import logging
 import os
 import shutil
@@ -19,15 +18,20 @@ import traceback
 import uuid
 
 from flask import Flask
+from osgeo import gdal
+from osgeo import ogr
+from osgeo import osr
 import flask
 import numpy
 import PIL
 import PIL.ImageDraw
-import retrying
+import pygeoprocessing
 import requests
+import retrying
 import shapely.geometry
 import tensorflow as tf
 
+FRAGMENT_SIZE = (419, 419)
 
 WORKSPACE_DIR = 'workspace_tf_server'
 ANNOTATED_IMAGE_DIR = os.path.join(WORKSPACE_DIR, 'annotated_images')
@@ -170,7 +174,7 @@ def do_detection(tf_graph, threshold_level, png_path):
     image = PIL.Image.open(png_path).convert("RGB")
     image_array = numpy.array(image.getdata()).reshape(
         image.size[1], image.size[0], 3)
-    LOGGER.debug('detection on %s (%s)', png_path, str(image_array.shape))
+    LOGGER.info('detection on %s (%s)', png_path, str(image_array.shape))
     with tf_graph.as_default():
         with tf.Session(graph=tf_graph) as sess:
             image_array_expanded = numpy.expand_dims(image_array, axis=0)
@@ -581,8 +585,7 @@ def old_inference_worker(
                     # image file somewhere and also make an entry in the
                     # database for image
                     detection_result = do_detection(
-                        inference_worker_host_queue, clipped_raster_path,
-                        DAM_IMAGE_WORKSPACE, '%s_%s' % (worker_id, quad_id))
+                        tf_graph, THRESHOLD_LEVEL, clipped_raster_path)
                     if detection_result:
                         image_bb_path, coord_list = detection_result
                         for coord_tuple in coord_list:
@@ -648,6 +651,9 @@ QUAD_AVAILBLE_EVENT = threading.Event()
 
 def do_inference_worker():
     """Calculate inference on the next available URL."""
+    wgs84_srs = osr.SpatialReference()
+    wgs84_srs.ImportFromEPSG(4326)
+    tf_graph = load_model(TF_GRAPH_PATH)
     while True:
         QUAD_AVAILBLE_EVENT.wait(5.0)
         if not URL_TO_PROCESS_LIST:
@@ -655,12 +661,62 @@ def do_inference_worker():
         quad_url = URL_TO_PROCESS_LIST.pop()
         QUAD_URL_TO_STATUS_MAP[quad_url] = 'processing'
         LOGGER.info('downloading ' + quad_url)
-        quad_path = os.path.join('/', 'data', os.path.basename(quad_url))
+        quad_workspace = os.path.join(
+            '/', 'data', os.path.basename(os.path.splitext(quad_url)[0]))
+        quad_raster_path = os.path.join(
+            quad_workspace, os.path.basename(quad_url))
+        LOGGER.info('download ' + quad_url)
         with requests.get(quad_url, stream=True, timeout=5.0) as r:
-            with open(quad_path, 'wb') as f:
+            with open(quad_raster_path, 'wb') as f:
                 shutil.copyfileobj(r.raw, f)
-        # TODO: download the url
-        # TODO: cut it into pieces
+        LOGGER.info('process cuts of quad ' + quad_raster_path)
+        raster_info = pygeoprocessing.get_raster_info(quad_raster_path)
+        x_size, y_size = raster_info['raster_size']
+        dam_list = []
+        for i_off in range(0, x_size, FRAGMENT_SIZE[0]):
+            for j_off in range(0, y_size, FRAGMENT_SIZE[1]):
+                ul_corner = gdal.ApplyGeoTransform(
+                    raster_info['geotransform'], i_off, j_off)
+                # guard against a clip that's too big
+                lr_corner = gdal.ApplyGeoTransform(
+                    raster_info['geotransform'],
+                    min(i_off+FRAGMENT_SIZE[0], x_size),
+                    min(j_off+FRAGMENT_SIZE[1], y_size))
+                xmin, xmax = sorted([ul_corner[0], lr_corner[0]])
+                ymin, ymax = sorted([ul_corner[1], lr_corner[1]])
+                clipped_raster_path = os.path.join(
+                    quad_workspace, '%d_%d.tif' % (i_off, j_off))
+                LOGGER.debug(
+                    "clip %s to %s", quad_raster_path,
+                    [xmin, ymin, xmax, ymax])
+                pygeoprocessing.warp_raster(
+                    quad_raster_path, raster_info['pixel_size'],
+                    clipped_raster_path, 'near',
+                    target_bb=[xmin, ymin, xmax, ymax])
+                detection_result = do_detection(
+                    tf_graph, THRESHOLD_LEVEL, clipped_raster_path)
+                if detection_result:
+                    image_bb_path, coord_list = detection_result
+                    for coord_tuple in coord_list:
+                        source_srs = osr.SpatialReference()
+                        source_srs.ImportFromWkt(raster_info['projection'])
+                        to_wgs84 = osr.CoordinateTransformation(
+                            source_srs, wgs84_srs)
+                        ul_point = ogr.Geometry(ogr.wkbPoint)
+                        ul_point.AddPoint(coord_tuple[0][0], coord_tuple[0][1])
+                        ul_point.Transform(to_wgs84)
+                        lr_point = ogr.Geometry(ogr.wkbPoint)
+                        lr_point.AddPoint(coord_tuple[1][0], coord_tuple[1][1])
+                        lr_point.Transform(to_wgs84)
+                        LOGGER.info(
+                            'found dams at %s %s image %s',
+                            str((ul_point.GetX(), ul_point.GetY())),
+                            str((lr_point.GetX(), lr_point.GetY())),
+                            image_bb_path)
+                        dam_list.append((
+                            lr_point.GetY(), lr_point.GetX(),
+                            ul_point.GetY(), ul_point.GetX()))
+
         # TODO: do inference on all the pieces
         # TODO: store the result in QUAD_URL_TO_STATUS_MAP
         # TODO: delete the quad

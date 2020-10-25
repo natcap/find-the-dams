@@ -18,7 +18,7 @@ RUN apt-get update \
 SHELL ["/bin/bash", "-c"]
 
 RUN conda create -y --name py36 python=3.6
-RUN conda run -v -n py36 conda install -c conda-forge gdal=2.4.2 && conda clean -a -y
+RUN conda run -v -n py36 conda install -c conda-forge gdal && conda clean -a -y
 RUN conda run -v -n py36 pip install --no-cache-dir \
     cython \
     ecoshard \
@@ -38,12 +38,8 @@ RUN conda run -v -n py36 pip install --no-cache-dir \
     taskgraph && conda clean -a -y
 
 RUN conda init bash && echo "source activate py36" > ~/.bashrc
-
-RUN hg clone http://bitbucket.org/natcap/pygeoprocessing /usr/local/pygeoprocessing
-WORKDIR /usr/local/pygeoprocessing
-RUN hg update 1.8.0 && conda run -v -n py36 python setup.py install
-WORKDIR /workspace
-COPY tensorflow-1.12.0-cp36-cp36m-linux_x86_64.whl /workspace
-RUN conda run -v -n py36 pip install tensorflow-1.12.0-cp36-cp36m-linux_x86_64.whl && rm tensorflow-1.12.0-cp36-cp36m-linux_x86_64.whl
+RUN conda run -v -n py36 pip install pygeoprocessing
+WORKDIR /usr/local/workspace
+RUN conda run -v -n py36 pip install pip install --no-cache-dir https://github.com/evdcush/TensorFlow-wheels/releases/download/tf-1.12.0-gpu-10.0/tensorflow-1.12.0-cp36-cp36m-linux_x86_64.whl
 
 ENTRYPOINT ["/bin/bash", "-l", "-c"]
