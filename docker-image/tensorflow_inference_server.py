@@ -800,7 +800,6 @@ if __name__ == '__main__':
     LOGGER.info(f'loading {args.tensorflow_model_path}')
     model = models.load_model(args.tensorflow_model_path, backbone_name='resnet50')
 
-
     do_inference_worker_thread = threading.Thread(
         target=do_inference_worker,
         args=(model,))
