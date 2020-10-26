@@ -8,6 +8,7 @@ RUN apt-get update -qq && \
     libspatialindex-dev \
     python3-pip \
     python3-gdal \
+    python3-opencv \
     postgresql-client \
     openssl \
     curl \
@@ -16,7 +17,7 @@ RUN apt-get update -qq && \
     rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt /usr/local/workspace/
-RUN pip3 install pygeoprocessing==1.9.2
+RUN pip3 install --no-cache-dir pygeoprocessing==1.9.2
 RUN pip3 install --no-cache-dir -r /usr/local/workspace/requirements.txt
 
 COPY natgeo_dams_model_resnet50_csv_64.h5 /usr/local/workspace/
