@@ -25,7 +25,7 @@ COPY tensorflow_inference_server.py /usr/local/workspace/
 
 RUN git clone https://github.com/fizyr/keras-retinanet.git /usr/local/keras-retinanet
 WORKDIR /usr/local/keras-retinanet
-RUN git checkout 0.5.2.beta0
+RUN git checkout 0.5.1
 RUN pip install . --user
 RUN echo export PATH=\$PATH:/root/.local/bin >> /root/.bashrc
 
