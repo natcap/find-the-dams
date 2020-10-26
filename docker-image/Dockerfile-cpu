@@ -30,7 +30,7 @@ RUN DEBIAN_FRONTEND=noninteractive apt-get install -y \
 
 COPY requirements.txt /usr/local/workspace/
 RUN pip install --upgrade pip
-RUN pip install pygeoprocessing
+RUN pip install pygeoprocessing==1.9.2
 RUN pip install -r /usr/local/workspace/requirements.txt
 
 COPY natgeo_dams_model_resnet50_csv_64.h5 /usr/local/workspace/
