@@ -21,6 +21,7 @@ from flask import Flask
 from osgeo import gdal
 from osgeo import ogr
 from osgeo import osr
+import cv2
 import flask
 import numpy
 import PIL
@@ -29,9 +30,12 @@ import pygeoprocessing
 import requests
 import retrying
 import shapely.geometry
-import tensorflow as tf
 
-FRAGMENT_SIZE = (419, 419)
+from keras_retinanet import models
+from keras_retinanet.utils.gpu import setup_gpu
+from keras_retinanet.utils.keras_version import check_keras_version
+from keras_retinanet.utils.tf_version import check_tf_version
+import keras
 
 WORKSPACE_DIR = 'workspace_tf_server'
 ANNOTATED_IMAGE_DIR = os.path.join(WORKSPACE_DIR, 'annotated_images')
@@ -250,16 +254,10 @@ def load_model(path_to_model):
         TensorFlow graph.
 
     """
-    detection_graph = tf.Graph()
-    with detection_graph.as_default():
-        od_graph_def = tf.GraphDef()
-        with tf.gfile.GFile(path_to_model, 'rb') as fid:
-            LOGGER.debug('this is the model: %s', path_to_model)
-            serialized_graph = fid.read()
-            od_graph_def.ParseFromString(serialized_graph)
-            tf.import_graph_def(od_graph_def, name='')
-
-    return detection_graph
+    check_keras_version()
+    check_tf_version()
+    model = models.load_model(TF_GRAPH_PATH, backbone_name='resnet50')
+    return model
 
 
 def session_map_to_response(session_map):
@@ -649,11 +647,41 @@ URL_TO_PROCESS_LIST = []
 QUAD_AVAILBLE_EVENT = threading.Event()
 
 
+def compute_resize_scale(image_shape, min_side=800, max_side=1333):
+    """Compute an image scale size to constrained to min_side/max_side.
+
+    Args:
+        min_side (int): The image's min side will be equal to min_side after
+            resizing.
+        max_side (int): If after resizing the image's max side is above
+            max_side, resize until the max side is equal to max_side.
+
+    Returns
+        A resizing scale.
+    """
+    (rows, cols, _) = image_shape
+    smallest_side = min(rows, cols)
+
+    # rescale the image so the smallest side is min_side
+    scale = min_side / smallest_side
+
+    # check if the largest side is now greater than max_side, which can happen
+    # when images have a large aspect ratio
+    largest_side = max(rows, cols)
+    if largest_side * scale > max_side:
+        scale = max_side / largest_side
+
+    return scale
+
+
 def do_inference_worker():
     """Calculate inference on the next available URL."""
     wgs84_srs = osr.SpatialReference()
     wgs84_srs.ImportFromEPSG(4326)
-    tf_graph = load_model(TF_GRAPH_PATH)
+    check_keras_version()
+    check_tf_version()
+    model = models.load_model(TF_GRAPH_PATH, backbone_name='resnet50')
+
     while True:
         QUAD_AVAILBLE_EVENT.wait(5.0)
         if not URL_TO_PROCESS_LIST:
@@ -670,53 +698,53 @@ def do_inference_worker():
             with open(quad_raster_path, 'wb') as f:
                 shutil.copyfileobj(r.raw, f)
         LOGGER.info('process cuts of quad ' + quad_raster_path)
-        raster_info = pygeoprocessing.get_raster_info(quad_raster_path)
-        x_size, y_size = raster_info['raster_size']
-        dam_list = []
-        for i_off in range(0, x_size, FRAGMENT_SIZE[0]):
-            for j_off in range(0, y_size, FRAGMENT_SIZE[1]):
-                ul_corner = gdal.ApplyGeoTransform(
-                    raster_info['geotransform'], i_off, j_off)
-                # guard against a clip that's too big
-                lr_corner = gdal.ApplyGeoTransform(
-                    raster_info['geotransform'],
-                    min(i_off+FRAGMENT_SIZE[0], x_size),
-                    min(j_off+FRAGMENT_SIZE[1], y_size))
-                xmin, xmax = sorted([ul_corner[0], lr_corner[0]])
-                ymin, ymax = sorted([ul_corner[1], lr_corner[1]])
-                clipped_raster_path = os.path.join(
-                    quad_workspace, '%d_%d.tif' % (i_off, j_off))
-                LOGGER.debug(
-                    "clip %s to %s", quad_raster_path,
-                    [xmin, ymin, xmax, ymax])
-                pygeoprocessing.warp_raster(
-                    quad_raster_path, raster_info['pixel_size'],
-                    clipped_raster_path, 'near',
-                    target_bb=[xmin, ymin, xmax, ymax])
-                detection_result = do_detection(
-                    tf_graph, THRESHOLD_LEVEL, clipped_raster_path)
-                if detection_result:
-                    image_bb_path, coord_list = detection_result
-                    for coord_tuple in coord_list:
-                        source_srs = osr.SpatialReference()
-                        source_srs.ImportFromWkt(raster_info['projection'])
-                        to_wgs84 = osr.CoordinateTransformation(
-                            source_srs, wgs84_srs)
-                        ul_point = ogr.Geometry(ogr.wkbPoint)
-                        ul_point.AddPoint(coord_tuple[0][0], coord_tuple[0][1])
-                        ul_point.Transform(to_wgs84)
-                        lr_point = ogr.Geometry(ogr.wkbPoint)
-                        lr_point.AddPoint(coord_tuple[1][0], coord_tuple[1][1])
-                        lr_point.Transform(to_wgs84)
-                        LOGGER.info(
-                            'found dams at %s %s image %s',
-                            str((ul_point.GetX(), ul_point.GetY())),
-                            str((lr_point.GetX(), lr_point.GetY())),
-                            image_bb_path)
-                        dam_list.append((
-                            lr_point.GetY(), lr_point.GetX(),
-                            ul_point.GetY(), ul_point.GetX()))
+        #raster_info = pygeoprocessing.get_raster_info(quad_raster_path)
 
+        try:
+            raw_image = numpy.asarray(PIL.Image.open(
+                quad_raster_path).convert('RGB'))[:, :, ::-1].copy()
+            image = (
+                raw_image.astype(numpy.float32) - [103.939, 116.779, 123.68])
+            scale = compute_resize_scale(
+                image.shape, min_side=800, max_side=1333)
+            image = cv2.resize(image, None, fx=scale, fy=scale)
+            if keras.backend.image_data_format() == 'channels_first':
+                image = image.transpose((2, 0, 1))
+
+            LOGGER.debug('run inference on image %s', str(image.shape))
+            result = model.predict_on_batch(
+                numpy.expand_dims(image, axis=0))
+            # correct boxes for image scale
+            LOGGER.debug('inference complete')
+            boxes, scores, labels = result
+            boxes /= scale
+
+            # convert box to a list from a numpy array and score to a value
+            # from a single element array
+            non_max_supression_box_list = []
+            box_score_tuple_list = [
+                (list(box), score) for box, score in zip(boxes[0], scores[0])
+                if score > 0.3]
+            while box_score_tuple_list:
+                box, score = box_score_tuple_list.pop()
+                shapely_box = shapely.geometry.box(*box)
+                keep = True
+                # this list makes a copy
+                for test_box, test_score in list(box_score_tuple_list):
+                    shapely_test_box = shapely.geometry.box(*test_box)
+                    if shapely_test_box.intersects(shapely_box):
+                        if test_score > score:
+                            # keep the new one
+                            keep = False
+                            break
+                if keep:
+                    non_max_supression_box_list.append((
+                        [float(x) for x in box], float(score)))
+
+            LOGGER.debug(non_max_supression_box_list)
+        except Exception as e:
+            LOGGER.exception('error on processing image')
+            return str(e), 500
         # TODO: do inference on all the pieces
         # TODO: store the result in QUAD_URL_TO_STATUS_MAP
         # TODO: delete the quad
