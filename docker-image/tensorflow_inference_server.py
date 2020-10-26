@@ -242,22 +242,6 @@ def do_detection(tf_graph, threshold_level, png_path):
     return bb_box_list, png_path
 
 
-def load_model(path_to_model):
-    """Load a TensorFlow model.
-
-    Parameters:
-        path_to_model (str): Path to a tensorflow frozen model.
-
-    Returns:
-        TensorFlow graph.
-
-    """
-    check_keras_version()
-    check_tf_version()
-    model = models.load_model(TF_GRAPH_PATH, backbone_name='resnet50')
-    return model
-
-
 def session_map_to_response(session_map):
     """Return HTTP response code if it's in there."""
     if 'http_status_code' in session_map:
