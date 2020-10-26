@@ -39,7 +39,7 @@ RUN apt install -y \
     python3-dev
 
 COPY requirements.txt /usr/local/workspace/
-RUN pip3 install --no-cache-dir pygeoprocessing==1.9.2
+RUN pip3 install --no-cache-dir pygeoprocessing
 RUN pip3 install --no-cache-dir -r /usr/local/workspace/requirements.txt
 
 COPY natgeo_dams_model_resnet50_csv_64.h5 /usr/local/workspace/
