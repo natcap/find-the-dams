@@ -17,9 +17,9 @@ RUN apt-get update \
 # python setup.py install
 SHELL ["/bin/bash", "-c"]
 
-RUN conda create -y --name py36 python=3.6
-RUN conda run -v -n py36 conda install -c conda-forge gdal && conda clean -a -y
-RUN conda run -v -n py36 pip install --no-cache-dir \
+RUN conda create -y --name py37 python=3.7
+RUN conda run -v -n py37 conda install -c conda-forge gdal && conda clean -a -y
+RUN conda run -v -n py37 pip install --no-cache-dir \
     cython \
     ecoshard \
     flask \
@@ -37,9 +37,9 @@ RUN conda run -v -n py36 pip install --no-cache-dir \
     sympy \
     taskgraph && conda clean -a -y
 
-RUN conda init bash && echo "source activate py36" > ~/.bashrc
-RUN conda run -v -n py36 pip install pygeoprocessing
+RUN conda init bash && echo "source activate py37" > ~/.bashrc
+RUN conda run -v -n py37 pip install pygeoprocessing
 WORKDIR /usr/local/workspace
-RUN conda run -v -n py36 pip install pip install --no-cache-dir https://github.com/evdcush/TensorFlow-wheels/releases/download/tf-1.12.0-gpu-10.0/tensorflow-1.12.0-cp36-cp36m-linux_x86_64.whl
+RUN conda run -v -n py37 pip install pip install --no-cache-dir https://github.com/evdcush/TensorFlow-wheels/releases/download/tf-1.12.0-py37-cpu-westmere/tensorflow-1.12.0-cp37-cp37m-linux_x86_64.whl
 
 ENTRYPOINT ["/bin/bash", "-l", "-c"]

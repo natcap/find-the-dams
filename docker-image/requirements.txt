@@ -1,6 +1,7 @@
 flask
 numpy
 pillow
+pygeoprocessing==1.9.2
 requests
 retrying
 rtree
