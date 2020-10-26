@@ -17,10 +17,10 @@ RUN DEBIAN_FRONTEND=noninteractive apt-get install -y \
     python3-dev \
     git
 
-# RUN apt-get install -y \
-#     gdal-bin \
-#     libgdal-dev \
-#     python3-gdal
+RUN apt-get install -y \
+    gdal-bin \
+    libgdal-dev \
+    python3-gdal
 #
 # RUN apt install -y \
 #     libffi-dev \
