@@ -13,7 +13,7 @@ RUN apt-get install -y \
     libspatialindex-c4v5 \
     libffi-dev \
     emacs \
-    python3-opencv \
+    python3-opencv-headless \
     python3-dev \
     git
 
