@@ -35,17 +35,15 @@ RUN pip install keras==2.3.1
 RUN pip install . --user
 RUN echo export PATH=\$PATH:/root/.local/bin >> /root/.bashrc
 
-#COPY requirements.txt /usr/local/workspace/
-#RUN pip install --upgrade pip
-#RUN pip install pygeoprocessing==2.0.0 --no-deps
-#RUN pip install -r /usr/local/workspace/requirements.txt
-#
-#COPY natgeo_dams_model_resnet50_csv_64.h5 /usr/local/workspace/
-#COPY tensorflow_inference_server.py /usr/local/workspace/
-#
-#
-#WORKDIR /usr/local/workspace
-#ENTRYPOINT [ \
-#    "python", "tensorflow_inference_server.py", \
-#    "natgeo_dams_model_resnet50_csv_64.h5"]
-#
+COPY requirements.txt /usr/local/workspace/
+RUN pip install --upgrade pip
+RUN pip install pygeoprocessing==2.0.0 --no-deps
+RUN pip install -r /usr/local/workspace/requirements.txt
+
+COPY natgeo_dams_model_resnet50_csv_64.h5 /usr/local/workspace/
+COPY tensorflow_inference_server.py /usr/local/workspace/
+
+WORKDIR /usr/local/workspace
+ENTRYPOINT [ \
+    "python", "tensorflow_inference_server.py", \
+    "natgeo_dams_model_resnet50_csv_64.h5"]
