@@ -1,4 +1,5 @@
 # natcap/dam-inference-server-cpu:0.0.1
+#FROM tensorflow/tensorflow:1.12.0-py3
 FROM tensorflow/tensorflow:2.1.0-py3
 
 SHELL ["/bin/bash", "-c"]
@@ -10,36 +11,25 @@ RUN apt-get update -y
 RUN apt-get install -y \
     build-essential \
     libspatialindex-c4v5 \
+    libffi-dev \
     emacs \
+    python3-opencv \
+    python3-dev \
     git
 
-RUN pip install --no-cache-dir \
-    Cython \
-    flask \
-    matplotlib \
-    numpy \
-    opencv-python-headless \
-    pillow \
-    Pillow \
-    pyyaml \
-    rtree \
-    scipy \
-    shapely \
-    pypng
-
-RUN apt-get install -y \
-    gdal-bin \
-    libgdal-dev \
-    python3-gdal
-
-RUN apt install -y \
-    libffi-dev \
-    python3-setuptools \
-    gcc \
-    python3-dev
+# RUN apt-get install -y \
+#     gdal-bin \
+#     libgdal-dev \
+#     python3-gdal
+#
+# RUN apt install -y \
+#     libffi-dev \
+#     python3-setuptools \
+#     gcc \
+#     python3-dev
 
 COPY requirements.txt /usr/local/workspace/
-RUN pip3 install --no-cache-dir pygeoprocessing
+RUN pip3 install --no-cache-dir pygeoprocessing==1.9.2
 RUN pip3 install --no-cache-dir -r /usr/local/workspace/requirements.txt
 
 COPY natgeo_dams_model_resnet50_csv_64.h5 /usr/local/workspace/
