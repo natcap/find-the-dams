@@ -672,13 +672,15 @@ def compute_resize_scale(image_shape, min_side=800, max_side=1333):
     return scale
 
 
-def do_inference_worker():
+def do_inference_worker(tf_graph_path):
     """Calculate inference on the next available URL."""
     wgs84_srs = osr.SpatialReference()
     wgs84_srs.ImportFromEPSG(4326)
     check_keras_version()
     check_tf_version()
-    model = models.load_model(TF_GRAPH_PATH, backbone_name='resnet50')
+
+    LOGGER.info(f'loading {tf_graph_path}')
+    model = models.load_model(tf_graph_path, backbone_name='resnet50')
 
     while True:
         QUAD_AVAILBLE_EVENT.wait(5.0)
@@ -813,11 +815,9 @@ if __name__ == '__main__':
         '--app_port', default=80, help='server port')
     args = parser.parse_args()
 
-    model = models.load_model(args.tensorflow_model_path, backbone_name='resnet50')
-    LOGGER.info('loading ' + args.tensorflow_model_path)
-
     do_inference_worker_thread = threading.Thread(
-        target=do_inference_worker)
+        target=do_inference_worker,
+        args=(args.tensorflow_model_path,))
     do_inference_worker_thread.daemon = True
     do_inference_worker_thread.start()
     APP.run(host='0.0.0.0', port=args.app_port)
