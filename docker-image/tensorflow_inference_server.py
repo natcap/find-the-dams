@@ -58,8 +58,6 @@ APP = Flask(__name__, static_url_path='', static_folder='')
 APP_ROOT = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_FOLDER = os.path.join(APP_ROOT, 'od_workspace')
 THRESHOLD_LEVEL = 0.08
-TF_GRAPH_PATH = sys.argv[1]
-
 
 try:
     shutil.rmtree(UPLOAD_FOLDER)
@@ -814,6 +812,8 @@ if __name__ == '__main__':
     parser.add_argument(
         '--app_port', default=80, help='server port')
     args = parser.parse_args()
+
+    model = models.load_model(args.tensorflow_model_path, backbone_name='resnet50')
     LOGGER.info('loading ' + args.tensorflow_model_path)
 
     do_inference_worker_thread = threading.Thread(
