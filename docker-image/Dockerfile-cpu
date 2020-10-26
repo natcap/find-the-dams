@@ -1,6 +1,6 @@
 # natcap/dam-inference-server-cpu:0.0.1
 #FROM tensorflow/tensorflow:1.12.0-py3
-FROM tensorflow/tensorflow:1.15.4
+FROM tensorflow/tensorflow:2.1.0-py3
 
 RUN apt-get update -qq && \
     apt-get install -y \
@@ -20,7 +20,7 @@ COPY natgeo_dams_model_resnet50_csv_64.h5 /usr/local/workspace/
 COPY requirements.txt /usr/local/workspace/
 RUN pip3 install pygeoprocessing==1.9.2
 RUN pip3 install --no-cache-dir -r /usr/local/workspace/requirements.txt
-RUN pip3 install tensorflow==1.12.0
+#RUN pip3 install tensorflow==1.12.0
 COPY tensorflow_inference_server.py /usr/local/workspace/
 
 WORKDIR /usr/local/workspace
