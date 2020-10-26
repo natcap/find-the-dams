@@ -3,7 +3,7 @@
 FROM tensorflow/tensorflow:2.1.0-py3
 
 RUN apt-get update -qq && \
-    noninteractive apt-get install -y \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y \
     emacs \
     libspatialindex-dev \
     python3-pip \
