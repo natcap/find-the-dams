@@ -667,10 +667,8 @@ def do_inference_worker(model):
             continue
         quad_url = URL_TO_PROCESS_LIST.pop()
         QUAD_URL_TO_STATUS_MAP[quad_url] = 'processing'
-        quad_workspace = os.path.join(
-            quad_workspace, os.path.basename(os.path.splitext(quad_url)[0]))
         quad_raster_path = os.path.join(
-            quad_workspace, os.path.basename(quad_url))
+            WORKSPACE_DIR, os.path.basename(quad_url))
         LOGGER.info('download ' + quad_url)
         with requests.get(quad_url, stream=True, timeout=5.0) as r:
             with open(quad_raster_path, 'wb') as f:
