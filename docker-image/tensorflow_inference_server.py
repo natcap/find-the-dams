@@ -13,13 +13,9 @@ import os
 import shutil
 import sys
 import threading
-import time
-import traceback
-import uuid
 
 from flask import Flask
 from osgeo import gdal
-from osgeo import ogr
 from osgeo import osr
 import cv2
 import flask
@@ -29,7 +25,6 @@ import PIL.ImageDraw
 import png
 import pygeoprocessing
 import requests
-import retrying
 import shapely.geometry
 
 from keras_retinanet import models
@@ -57,39 +52,7 @@ LOGGER = logging.getLogger(__name__)
 
 APP = Flask(__name__, static_url_path='', static_folder='')
 APP_ROOT = os.path.dirname(os.path.abspath(__file__))
-UPLOAD_FOLDER = os.path.join(APP_ROOT, 'od_workspace')
-THRESHOLD_LEVEL = 0.08
-
 TRAINING_IMAGE_DIMS = (419, 419)
-
-try:
-    shutil.rmtree(UPLOAD_FOLDER)
-except OSError:
-    pass
-try:
-    os.makedirs(UPLOAD_FOLDER)
-except OSError:
-    pass
-
-# Configure Flask app and the logo upload folder
-APP.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-
-# map session ids to current state
-# can be
-#  * 'waiting for upload'
-#  * 'processing'
-#  * 'complete'
-#       * if complete then has 'annotated_png_url_base' to turn into url
-#  * '<traceback>' with 500 error
-SESSION_MANAGER_MAP = {}
-
-# this is used to clear out unused sessions, it will have a
-# (last accessed timestamp, files created list) tuple that a thread monitors
-# and cleans periodically.
-LAST_ACCESSED_SESSION_MAP = {}
-# if session not accessed within this amount of time files in
-# LAST_ACCESSED_SESSION_MAP will be removed
-CLEANUP_WAIT_TIME = 60.0
 
 
 def render_bounding_boxes(bb_box_list, png_path):
@@ -351,7 +314,8 @@ if __name__ == '__main__':
         setup_gpu(args.gpu)
 
     LOGGER.info(f'loading {args.tensorflow_model_path}')
-    model = models.load_model(args.tensorflow_model_path, backbone_name='resnet50')
+    model = models.load_model(
+        args.tensorflow_model_path, backbone_name='resnet50')
 
     do_inference_worker_thread = threading.Thread(
         target=do_inference_worker,
@@ -359,12 +323,3 @@ if __name__ == '__main__':
     do_inference_worker_thread.daemon = True
     do_inference_worker_thread.start()
     APP.run(host='0.0.0.0', port=args.app_port)
-
-    # SESSION_MANAGER_LOCK = threading.Lock()
-    # WORK_QUEUE = queue.Queue()
-    # inference_thread = threading.Thread(
-    #     target=inference_worker,
-    #     args=(TF_GRAPH_PATH, WORK_QUEUE))
-    # inference_thread.start()
-    # garbage_collection_thread = threading.Thread(target=garbage_collection)
-    # garbage_collection_thread.start()
