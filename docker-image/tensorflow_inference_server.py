@@ -262,7 +262,7 @@ def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
             # TODO: store the result in QUAD_URL_TO_STATUS_MAP
             # TODO: delete the quad
             LOGGER.info('done processing quad %s', quad_raster_path)
-            LOGGER.debug('took %s seconds', str(time.time()-start_time))
+            LOGGER.info('took %s seconds', str(time.time()-start_time))
             if len(URL_TO_PROCESS_LIST) == 0:
                 QUAD_AVAILBLE_EVENT.clear()
     except Exception:
