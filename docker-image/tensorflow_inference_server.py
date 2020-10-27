@@ -92,7 +92,7 @@ LAST_ACCESSED_SESSION_MAP = {}
 CLEANUP_WAIT_TIME = 60.0
 
 
-def render_bounding_boxes:
+def render_bounding_boxes(bb_box_list, png_path):
     """Take a payload and render the image and update the session manager."""
     image = PIL.Image.open(png_path).convert("RGB")
     bb_list = []
