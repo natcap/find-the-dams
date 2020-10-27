@@ -98,9 +98,9 @@ def render_bounding_boxes(bb_box_list, png_path):
     bb_list = []
     image_draw = PIL.ImageDraw.Draw(image)
     for box in bb_box_list:
-        image_draw.rectangle(box.bounds, outline='RED')
-        ul_corner = (float(box.bounds[0]), float(box.bounds[1]))
-        lr_corner = (float(box.bounds[2]), float(box.bounds[3]))
+        image_draw.rectangle(box, outline='RED')
+        ul_corner = (float(box[0]), float(box[1]))
+        lr_corner = (float(box[2]), float(box[3]))
         bb_list.append((ul_corner, lr_corner))
     del image_draw
     image.save(png_path)
