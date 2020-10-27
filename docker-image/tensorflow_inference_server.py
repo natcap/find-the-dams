@@ -282,7 +282,7 @@ def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
             # make_quad_png(
             #     quad_raster_path, quad_png_path, 0, 0, None, None)
             # render_bounding_boxes(non_max_supression_box_list, quad_png_path)
-            QUAD_URL_TO_STATUS_MAP[quad_url] = 'complete'
+            QUAD_URL_TO_STATUS_MAP[quad_url] = non_max_supression_box_list
             LOGGER.info('done processing quad %s', quad_raster_path)
             LOGGER.info('took %s seconds', str(time.time()-start_time))
             LOGGER.info('inference time %s sec', str(time.time()-inference_time))
@@ -313,8 +313,8 @@ def job_status():
     """Report status of given job."""
     # 'idle'
     # 'processing'
-    # 'complete'
     # 'error'
+    # [a list of obunding boxes]
     quad_url = flask.request.json['quad_url']
     LOGGER.info('fetch status of ' + quad_url)
     status = QUAD_URL_TO_STATUS_MAP[quad_url]
