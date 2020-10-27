@@ -222,37 +222,39 @@ def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
             quad_offset_queue.put('STOP')
             while True:
                 payload = quad_file_path_queue.get()
+                LOGGER.info('got payload for inference')
                 if payload == 'STOP':
                     break
                 scale, image = payload
                 result = model.predict_on_batch(image)
-                # correct boxes for image scale
-                # boxes, scores, labels = result
-                # boxes /= scale
 
-                # # convert box to a list from a numpy array and score to a value
-                # # from a single element array
-                # box_score_tuple_list = [
-                #     (list(box), score) for box, score in zip(
-                #         boxes[0], scores[0]) if score > 0.3]
-                # local_box_list = []
-                # while box_score_tuple_list:
-                #     box, score = box_score_tuple_list.pop()
-                #     shapely_box = shapely.geometry.box(*box)
-                #     keep = True
-                #     # this list makes a copy
-                #     for test_box, test_score in list(box_score_tuple_list):
-                #         shapely_test_box = shapely.geometry.box(*test_box)
-                #         if shapely_test_box.intersects(shapely_box):
-                #             if test_score > score:
-                #                 # keep the new one
-                #                 keep = False
-                #                 break
-                #     if keep:
-                #         local_box_list.append([
-                #             box[0]+xoff, box[1]+yoff,
-                #             box[2]+xoff, box[3]+yoff])
-                # non_max_supression_box_list.extend(local_box_list)
+                # correct boxes for image scale
+                boxes, scores, labels = result
+                boxes /= scale
+
+                # convert box to a list from a numpy array and score to a value
+                # from a single element array
+                box_score_tuple_list = [
+                    (list(box), score) for box, score in zip(
+                        boxes[0], scores[0]) if score > 0.3]
+                local_box_list = []
+                while box_score_tuple_list:
+                    box, score = box_score_tuple_list.pop()
+                    shapely_box = shapely.geometry.box(*box)
+                    keep = True
+                    # this list makes a copy
+                    for test_box, test_score in list(box_score_tuple_list):
+                        shapely_test_box = shapely.geometry.box(*test_box)
+                        if shapely_test_box.intersects(shapely_box):
+                            if test_score > score:
+                                # keep the new one
+                                keep = False
+                                break
+                    if keep:
+                        local_box_list.append([
+                            box[0]+xoff, box[1]+yoff,
+                            box[2]+xoff, box[3]+yoff])
+                non_max_supression_box_list.extend(local_box_list)
 
             #quad_png_path = '%s.png' % os.path.splitext(quad_raster_path)[0]
             # make_quad_png(
