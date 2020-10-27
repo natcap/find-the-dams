@@ -220,6 +220,7 @@ def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
                         (quad_png_path, quad_raster_path,
                          xoff, yoff, win_xsize, win_ysize))
             quad_offset_queue.put('STOP')
+            inference_time = time.time()
             while True:
                 payload = quad_file_path_queue.get()
                 LOGGER.info('got payload for inference')
@@ -264,6 +265,7 @@ def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
             # TODO: delete the quad
             LOGGER.info('done processing quad %s', quad_raster_path)
             LOGGER.info('took %s seconds', str(time.time()-start_time))
+            LOGGER.info('inference time %s sec', str(time.time()-inference_time))
             if len(URL_TO_PROCESS_LIST) == 0:
                 QUAD_AVAILBLE_EVENT.clear()
     except Exception:
@@ -345,7 +347,7 @@ if __name__ == '__main__':
     model = models.load_model(
         args.tensorflow_model_path, backbone_name='resnet50')
 
-    quad_offset_queue = queue.Queue()
+    quad_offset_queue = queue.Queue(1)
     quad_file_path_queue = queue.Queue()
 
     quad_processor_worker_thread = threading.Thread(
