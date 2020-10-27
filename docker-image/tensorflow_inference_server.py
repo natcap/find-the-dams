@@ -149,9 +149,6 @@ def quad_processor(quad_offset_queue, quad_file_path_queue):
     try:
         while True:
             payload = quad_offset_queue.get()
-            if payload == 'STOP':
-                quad_file_path_queue.put('STOP')
-                continue
             (quad_png_path, quad_raster_path,
              xoff, yoff, win_xsize, win_ysize) = payload
             LOGGER.info('clipping for ' + quad_png_path + ' from ' + quad_raster_path + str((quad_png_path, quad_raster_path,
@@ -219,14 +216,11 @@ def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
                     quad_offset_queue.put(
                         (quad_png_path, quad_raster_path,
                          xoff, yoff, win_xsize, win_ysize))
-            quad_offset_queue.put('STOP')
+
             inference_time = time.time()
-            while True:
-                payload = quad_file_path_queue.get()
-                LOGGER.info('got payload for inference')
-                if payload == 'STOP':
-                    break
-                scale, image = payload
+            while quad_slice_index > 0:
+                quad_slice_index -= 1
+                scale, image = quad_file_path_queue.get()
                 result = model.predict_on_batch(image)
 
                 # correct boxes for image scale
@@ -347,7 +341,7 @@ if __name__ == '__main__':
     model = models.load_model(
         args.tensorflow_model_path, backbone_name='resnet50')
 
-    quad_offset_queue = queue.Queue(1)
+    quad_offset_queue = queue.Queue()
     quad_file_path_queue = queue.Queue()
 
     quad_processor_worker_thread = threading.Thread(
@@ -356,9 +350,11 @@ if __name__ == '__main__':
     quad_processor_worker_thread.daemon = True
     quad_processor_worker_thread.start()
 
-    do_inference_worker_thread = threading.Thread(
-        target=do_inference_worker,
-        args=(model, quad_offset_queue, quad_file_path_queue))
-    do_inference_worker_thread.daemon = True
-    do_inference_worker_thread.start()
+    # make 4 clipper workers
+    for _ in range(4):
+        do_inference_worker_thread = threading.Thread(
+            target=do_inference_worker,
+            args=(model, quad_offset_queue, quad_file_path_queue))
+        do_inference_worker_thread.daemon = True
+        do_inference_worker_thread.start()
     APP.run(host='0.0.0.0', port=args.app_port)
