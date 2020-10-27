@@ -270,7 +270,7 @@ def do_inference_worker(model):
                     return str(e), 500
         quad_png_path = '%s.png' % os.path.splitext(quad_raster_path)[0]
         make_quad_png(
-            quad_raster_path, quad_png_path, xoff, yoff, None, None)
+            quad_raster_path, quad_png_path, 0, 0, None, None)
         render_bounding_boxes(local_box_list, quad_png_path)
         # TODO: store the result in QUAD_URL_TO_STATUS_MAP
         # TODO: delete the quad
