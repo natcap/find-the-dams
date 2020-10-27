@@ -234,6 +234,7 @@ def do_inference_worker(model):
                     LOGGER.debug('run inference on image %s', quad_png_path)
                     result = model.predict_on_batch(
                         numpy.expand_dims(image, axis=0))
+                    os.remove(quad_png_path)
                     # correct boxes for image scale
                     LOGGER.debug('inference complete')
                     LOGGER.debug('results: ' + str(result))
