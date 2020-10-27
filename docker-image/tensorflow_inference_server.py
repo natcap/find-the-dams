@@ -153,10 +153,12 @@ def quad_processor(quad_offset_queue, quad_file_path_queue):
                 continue
             (quad_png_path, quad_raster_path,
              xoff, yoff, win_xsize, win_ysize) = payload
-            LOGGER.info('clipping for ' + quad_png_path + ' from ' + quad_raster_path)
+            LOGGER.info('clipping for ' + quad_png_path + ' from ' + quad_raster_path + str((quad_png_path, quad_raster_path,
+             xoff, yoff, win_xsize, win_ysize)))
             make_quad_png(
                 quad_raster_path, quad_png_path,
                 xoff, yoff, win_xsize, win_ysize)
+            LOGGER.info('successful clip of ' + quad_png_path)
             quad_file_path_queue.put(quad_png_path)
     except Exception:
         LOGGER.exception('error occured on quad processor')
@@ -208,6 +210,7 @@ def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
 
             while True:
                 payload = quad_file_path_queue.get()
+                LOGGER.info('inference pipeline got ' + payload)
                 if payload == 'STOP':
                     break
                 quad_png_path = payload
