@@ -146,13 +146,27 @@ def make_quad_png(
 
 
 def quad_processor(quad_offset_queue, quad_file_path_queue):
+    """Process a Quad.
+
+    Args:
+        quad_offset_queue (queue): contains
+            (quad_png_path, quad_raster_path, xoff, yoff, win_xsize, win_ysize)
+            payload for indicating what image to clip.
+        quad_file_path_queue (queue): the "output" queue for what file has been
+            clipped and any scaling that's done (scale, image).
+
+    Returns:
+        never.
+    """
     try:
         while True:
             payload = quad_offset_queue.get()
             (quad_png_path, quad_raster_path,
              xoff, yoff, win_xsize, win_ysize) = payload
-            LOGGER.info('clipping for ' + quad_png_path + ' from ' + quad_raster_path + str((quad_png_path, quad_raster_path,
-             xoff, yoff, win_xsize, win_ysize)))
+            LOGGER.info(
+                'clipping for ' + quad_png_path + ' from ' + quad_raster_path +
+                str((quad_png_path, quad_raster_path, xoff, yoff, win_xsize,
+                     win_ysize)))
             make_quad_png(
                 quad_raster_path, quad_png_path,
                 xoff, yoff, win_xsize, win_ysize)
@@ -177,7 +191,20 @@ def quad_processor(quad_offset_queue, quad_file_path_queue):
 
 
 def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
-    """Calculate inference on the next available URL."""
+    """Calculate inference on data coming in on the URL_TO_PROCESS_LIST.
+
+    Other notable global variable is QUAD_AVAILBLE_EVENT that's an event for
+    waiting for new work that gets set when new works is recieved.
+
+    Args:
+        model (keras model): model used for bounding box prediction
+        quad_offset_queue (queue): send to queue for quad processing
+        quad_file_path_queue (queue): used for recieving quads that need to be
+            inferenced.
+
+    Returns:
+        never
+    """
     try:
         wgs84_srs = osr.SpatialReference()
         wgs84_srs.ImportFromEPSG(4326)
@@ -255,8 +282,7 @@ def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
             # make_quad_png(
             #     quad_raster_path, quad_png_path, 0, 0, None, None)
             # render_bounding_boxes(non_max_supression_box_list, quad_png_path)
-            # TODO: store the result in QUAD_URL_TO_STATUS_MAP
-            # TODO: delete the quad
+            QUAD_URL_TO_STATUS_MAP[quad_url] = 'complete'
             LOGGER.info('done processing quad %s', quad_raster_path)
             LOGGER.info('took %s seconds', str(time.time()-start_time))
             LOGGER.info('inference time %s sec', str(time.time()-inference_time))
@@ -264,6 +290,7 @@ def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
                 QUAD_AVAILBLE_EVENT.clear()
     except Exception:
         LOGGER.exception('error occured on inference worker')
+        QUAD_URL_TO_STATUS_MAP[quad_url] = 'error'
         raise
 
 
@@ -350,7 +377,7 @@ if __name__ == '__main__':
     quad_processor_worker_thread.daemon = True
     quad_processor_worker_thread.start()
 
-    # make 2 clipper workers
+    # make clipper workers
     for _ in range(8):
         do_inference_worker_thread = threading.Thread(
             target=do_inference_worker,
