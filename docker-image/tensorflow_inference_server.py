@@ -350,8 +350,8 @@ if __name__ == '__main__':
     quad_processor_worker_thread.daemon = True
     quad_processor_worker_thread.start()
 
-    # make 4 clipper workers
-    for _ in range(4):
+    # make 2 clipper workers
+    for _ in range(8):
         do_inference_worker_thread = threading.Thread(
             target=do_inference_worker,
             args=(model, quad_offset_queue, quad_file_path_queue))
