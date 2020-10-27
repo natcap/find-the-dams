@@ -163,10 +163,6 @@ def quad_processor(quad_offset_queue, quad_file_path_queue):
             payload = quad_offset_queue.get()
             (quad_png_path, quad_raster_path,
              xoff, yoff, win_xsize, win_ysize) = payload
-            LOGGER.info(
-                'clipping for ' + quad_png_path + ' from ' + quad_raster_path +
-                str((quad_png_path, quad_raster_path, xoff, yoff, win_xsize,
-                     win_ysize)))
             make_quad_png(
                 quad_raster_path, quad_png_path,
                 xoff, yoff, win_xsize, win_ysize)
@@ -228,6 +224,7 @@ def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
             quad_slice_index = 0
             non_max_supression_box_list = []
 
+            LOGGER.info('schedule clip of %s', quad_id)
             for xoff in range(0, n_cols, TRAINING_IMAGE_DIMS[0]):
                 win_xsize = TRAINING_IMAGE_DIMS[0]
                 if xoff + win_xsize >= n_cols:
@@ -244,12 +241,16 @@ def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
                         (quad_png_path, quad_raster_path,
                          xoff, yoff, win_xsize, win_ysize))
 
+            LOGGER.info('schedule inference of %s', quad_id)
             inference_time = time.time()
             while quad_slice_index > 0:
                 quad_slice_index -= 1
                 scale, image = quad_file_path_queue.get()
+                start_time = time.time()
                 result = model.predict_on_batch(image)
-
+                LOGGER.info(
+                    'took %ss for iteration %d',
+                    str(time.time()-start_time), quad_slice_index)
                 # correct boxes for image scale
                 boxes, scores, labels = result
                 boxes /= scale
@@ -282,10 +283,25 @@ def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
             # make_quad_png(
             #     quad_raster_path, quad_png_path, 0, 0, None, None)
             # render_bounding_boxes(non_max_supression_box_list, quad_png_path)
-            QUAD_URL_TO_STATUS_MAP[quad_url] = non_max_supression_box_list
-            LOGGER.info('done processing quad %s', quad_raster_path)
-            LOGGER.info('took %s seconds', str(time.time()-start_time))
-            LOGGER.info('inference time %s sec', str(time.time()-inference_time))
+            LOGGER.info(
+                'inference time %s sec', str(time.time()-inference_time))
+            bb_transform_time = time.time()
+            lat_lng_bb_list = []
+            for bounding_box in non_max_supression_box_list:
+                coord_list = []
+                for index in [0, 2]:
+                    coord_list.extend(
+                        gdal.ApplyGeoTransform(
+                            quad_info['geotransform'],
+                            bounding_box[index], bounding_box[index+1]))
+                lat_lng_bb_list.append(coord_list)
+            QUAD_URL_TO_STATUS_MAP[quad_url] = lat_lng_bb_list
+            LOGGER.info(
+                'took %ss to transform to lat/lng',
+                str(time.time()-bb_transform_time))
+            LOGGER.info(
+                'done processing quad %s took %ss',
+                quad_raster_path, str(time.time()-start_time))
             if len(URL_TO_PROCESS_LIST) == 0:
                 QUAD_AVAILBLE_EVENT.clear()
     except Exception:
