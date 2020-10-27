@@ -260,10 +260,10 @@ def do_inference_worker(model):
                                     keep = False
                                     break
                         if keep:
-                            local_box_list.append([float(x) for x in box])
-                    non_max_supression_box_list.extend([
-                        [bb[0]+xoff, bb[1]+yoff, bb[2]+xoff, bb[3]+yoff]
-                        for bb in local_box_list])
+                            local_box_list.append([
+                                box[0]+xoff, box[1]+yoff,
+                                box[2]+xoff, box[3]+yoff])
+                    non_max_supression_box_list.extend(local_box_list)
 
                 except Exception as e:
                     LOGGER.exception('error on processing image')
@@ -271,7 +271,7 @@ def do_inference_worker(model):
         quad_png_path = '%s.png' % os.path.splitext(quad_raster_path)[0]
         make_quad_png(
             quad_raster_path, quad_png_path, 0, 0, None, None)
-        render_bounding_boxes(local_box_list, quad_png_path)
+        render_bounding_boxes(non_max_supression_box_list, quad_png_path)
         # TODO: store the result in QUAD_URL_TO_STATUS_MAP
         # TODO: delete the quad
         LOGGER.info('done processing quad %s', quad_raster_path)
