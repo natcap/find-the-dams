@@ -26,6 +26,7 @@ import flask
 import numpy
 import PIL
 import PIL.ImageDraw
+import png
 import pygeoprocessing
 import requests
 import retrying

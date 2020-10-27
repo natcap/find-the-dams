@@ -1,6 +1,7 @@
 flask
 numpy
 pillow
+pypng
 requests
 retrying
 rtree
