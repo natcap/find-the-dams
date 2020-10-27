@@ -170,7 +170,7 @@ def quad_processor(quad_offset_queue, quad_file_path_queue):
             if keras.backend.image_data_format() == 'channels_first':
                 image = image.transpose((2, 0, 1))
             image = numpy.expand_dims(image, axis=0)
-            quad_file_path_queue.put(image)
+            quad_file_path_queue.put((scale, image))
             LOGGER.info('successful clip of ' + quad_png_path)
             os.remove(quad_png_path)
 
@@ -222,34 +222,20 @@ def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
             quad_offset_queue.put('STOP')
             while True:
                 payload = quad_file_path_queue.get()
-                LOGGER.info('inference pipeline got ' + payload)
                 if payload == 'STOP':
                     break
-                image = payload
-                raw_image = numpy.asarray(PIL.Image.open(
-                    quad_png_path).convert('RGB'))[:, :, ::-1].copy()
-                image = (
-                    raw_image.astype(numpy.float32) - [
-                        103.939, 116.779, 123.68])
-                scale = compute_resize_scale(
-                    image.shape, min_side=800, max_side=1333)
-                image = cv2.resize(image, None, fx=scale, fy=scale)
-                if keras.backend.image_data_format() == 'channels_first':
-                    image = image.transpose((2, 0, 1))
-
-                result = model.predict_on_batch(
-                    numpy.expand_dims(image, axis=0))
-                os.remove(quad_png_path)
+                scale, image = payload
+                result = model.predict_on_batch(image)
                 # correct boxes for image scale
-                boxes, scores, labels = result
-                boxes /= scale
+                # boxes, scores, labels = result
+                # boxes /= scale
 
-                # convert box to a list from a numpy array and score to a value
-                # from a single element array
-                box_score_tuple_list = [
-                    (list(box), score) for box, score in zip(
-                        boxes[0], scores[0]) if score > 0.3]
-                local_box_list = []
+                # # convert box to a list from a numpy array and score to a value
+                # # from a single element array
+                # box_score_tuple_list = [
+                #     (list(box), score) for box, score in zip(
+                #         boxes[0], scores[0]) if score > 0.3]
+                # local_box_list = []
                 # while box_score_tuple_list:
                 #     box, score = box_score_tuple_list.pop()
                 #     shapely_box = shapely.geometry.box(*box)
