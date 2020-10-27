@@ -1,5 +1,3 @@
-# natcap/dam-inference-server-cpu:0.0.1
-#FROM tensorflow/tensorflow:1.12.0-py3
 FROM tensorflow/tensorflow:2.1.0-py3
 
 SHELL ["/bin/bash", "-c"]

@@ -1,22 +1,47 @@
-# natcap/dam-inference-server-gpu:0.0.1
-FROM tensorflow/tensorflow:1.12.0-gpu-py3
+FROM tensorflow/tensorflow:2.1.0-gpu-py3
 
-RUN apt-get update \
-&& apt-get install -y \
+SHELL ["/bin/bash", "-c"]
+
+RUN apt-get update -y
+RUN apt-get install software-properties-common -y
+RUN add-apt-repository ppa:ubuntugis/ubuntugis-unstable
+RUN apt-get update -y
+RUN DEBIAN_FRONTEND=noninteractive apt-get install -y \
     build-essential \
     libspatialindex-c4v5 \
-    mercurial \
-&& rm -rf /var/lib/apt/lists/*
+    libffi-dev \
+    emacs \
+    python3-opencv \
+    python3-dev \
+    git
 
-RUN pip install --no-cache-dir \
-    flask \
-    numpy \
-    pillow \
-    rtree \
-    scipy \
-    shapely
+RUN apt-get install -y \
+    gdal-bin \
+    libgdal-dev \
+    python3-gdal
 
-COPY fasterRCNN_08-26-withnotadams.pb /var/models/fasterRCNN_08-26-withnotadams.pb
-COPY tensorflow_inference_server.py /workspace/tensorflow_inference_server.py
-WORKDIR /workspace
-ENTRYPOINT ["python3", "tensorflow_inference_server.py", "/var/models/fasterRCNN_08-26-withnotadams.pb"]
+RUN apt install -y \
+    libffi-dev \
+    python3-setuptools \
+    gcc \
+    python3-dev
+
+RUN git clone https://github.com/fizyr/keras-retinanet.git /usr/local/keras-retinanet
+WORKDIR /usr/local/keras-retinanet
+RUN git checkout 1d5f60bd69b2d79776b849bd0a02249c0d38d4b3
+RUN pip install keras==2.3.1
+RUN pip install . --user
+RUN echo export PATH=\$PATH:/root/.local/bin >> /root/.bashrc
+
+COPY requirements.txt /usr/local/workspace/
+RUN pip install --upgrade pip
+RUN pip install pygeoprocessing==2.0.0 --no-deps
+RUN pip install -r /usr/local/workspace/requirements.txt
+
+COPY natgeo_dams_model_resnet50_csv_64.h5 /usr/local/workspace/
+COPY tensorflow_inference_server.py /usr/local/workspace/
+
+WORKDIR /usr/local/workspace
+ENTRYPOINT [ \
+    "python", "tensorflow_inference_server.py", \
+    "natgeo_dams_model_resnet50_csv_64.h5"]
