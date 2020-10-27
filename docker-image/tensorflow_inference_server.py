@@ -667,9 +667,8 @@ def do_inference_worker(model):
             continue
         quad_url = URL_TO_PROCESS_LIST.pop()
         QUAD_URL_TO_STATUS_MAP[quad_url] = 'processing'
-        LOGGER.info('downloading ' + quad_url)
         quad_workspace = os.path.join(
-            '/', 'data', os.path.basename(os.path.splitext(quad_url)[0]))
+            quad_workspace, os.path.basename(os.path.splitext(quad_url)[0]))
         quad_raster_path = os.path.join(
             quad_workspace, os.path.basename(quad_url))
         LOGGER.info('download ' + quad_url)
@@ -734,7 +733,6 @@ def do_inference_worker(model):
 @APP.route('/do_inference', methods=['POST'])
 def do_inference():
     """Run dam inference on the posted quad."""
-    LOGGER.debug(flask.request.data)
     LOGGER.debug(flask.request.json)
     quad_url = flask.request.json['quad_url']
 

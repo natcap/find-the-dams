@@ -138,7 +138,8 @@ def main():
     client_monitor_thread = threading.Thread(
         target=client_monitor,
         args=(DAM_INFERENCE_WORKER_KEY,),
-        kwargs={'local_hosts': {'localhost'}})
+        )
+        # kwargs={'local_hosts': {'localhost'}})
     client_monitor_thread.daemon = True
     client_monitor_thread.start()
 
@@ -386,7 +387,8 @@ def client_monitor(client_key, update_interval=5.0, local_hosts=None):
             if local_hosts is not None:
                 live_workers.update([Worker(host) for host in local_hosts])
             for instance in json.loads(result):
-                network_ip = instance['networkInterfaces'][0]['networkIP']
+                network_ip = instance['networkInterfaces'][0][
+                    'accessConfigs'][0]['natIP']
                 LOGGER.debug(f"{instance['name']} {network_ip}")
                 live_workers.add(Worker(network_ip))
 
