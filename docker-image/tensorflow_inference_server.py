@@ -692,6 +692,7 @@ def do_inference_worker(model):
                 numpy.expand_dims(image, axis=0))
             # correct boxes for image scale
             LOGGER.debug('inference complete')
+            LOGGER.debug('results: ' + str(result))
             boxes, scores, labels = result
             boxes /= scale
 
@@ -721,7 +722,6 @@ def do_inference_worker(model):
         except Exception as e:
             LOGGER.exception('error on processing image')
             return str(e), 500
-        # TODO: do inference on all the pieces
         # TODO: store the result in QUAD_URL_TO_STATUS_MAP
         # TODO: delete the quad
         if len(URL_TO_PROCESS_LIST) == 0:
