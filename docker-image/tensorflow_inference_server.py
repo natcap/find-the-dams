@@ -199,14 +199,14 @@ def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
                     win_ysize = TRAINING_IMAGE_DIMS[1]
                     if yoff + win_ysize >= n_rows:
                         yoff = n_rows-win_ysize-1
-                        quad_png_path = os.path.join(
-                            WORKSPACE_DIR, '%s_%d.png' % (
-                                quad_id, quad_slice_index))
-                        quad_slice_index += 1
-                        quad_offset_queue.put(
-                            (quad_png_path, quad_raster_path,
-                             xoff, yoff, win_xsize, win_ysize))
-
+                    quad_png_path = os.path.join(
+                        WORKSPACE_DIR, '%s_%d.png' % (
+                            quad_id, quad_slice_index))
+                    quad_slice_index += 1
+                    quad_offset_queue.put(
+                        (quad_png_path, quad_raster_path,
+                         xoff, yoff, win_xsize, win_ysize))
+            quad_offset_queue.put('STOP')
             while True:
                 payload = quad_file_path_queue.get()
                 LOGGER.info('inference pipeline got ' + payload)
