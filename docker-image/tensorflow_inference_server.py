@@ -37,7 +37,7 @@ from keras_retinanet.utils.keras_version import check_keras_version
 from keras_retinanet.utils.tf_version import check_tf_version
 import keras
 
-WORKSPACE_DIR = 'data_dir'
+WORKSPACE_DIR = '/usr/local/data_dir'
 ANNOTATED_IMAGE_DIR = os.path.join(WORKSPACE_DIR, 'annotated_images')
 for dirname in [WORKSPACE_DIR, ANNOTATED_IMAGE_DIR]:
     try:
@@ -669,7 +669,7 @@ def do_inference_worker(model):
         QUAD_URL_TO_STATUS_MAP[quad_url] = 'processing'
         quad_raster_path = os.path.join(
             WORKSPACE_DIR, os.path.basename(quad_url))
-        LOGGER.info('download ' + quad_url)
+        LOGGER.info('download ' + quad_url + ' to ' + quad_raster_path)
         with requests.get(quad_url, stream=True, timeout=5.0) as r:
             with open(quad_raster_path, 'wb') as f:
                 shutil.copyfileobj(r.raw, f)
