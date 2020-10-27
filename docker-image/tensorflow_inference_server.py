@@ -20,6 +20,7 @@ from flask import Flask
 from osgeo import gdal
 from osgeo import osr
 import cv2
+import ecoshard
 import flask
 import numpy
 import PIL
@@ -181,9 +182,7 @@ def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
             quad_raster_path = os.path.join(
                 WORKSPACE_DIR, os.path.basename(quad_url))
             LOGGER.info('download ' + quad_url + ' to ' + quad_raster_path)
-            with requests.get(quad_url, stream=True, timeout=5.0) as r:
-                with open(quad_raster_path, 'wb') as f:
-                    shutil.copyfileobj(r.raw, f)
+            ecoshard.download_url(quad_url, quad_raster_path)
             LOGGER.info('process cuts of quad ' + quad_raster_path)
 
             quad_info = pygeoprocessing.get_raster_info(quad_raster_path)
