@@ -40,8 +40,8 @@ RUN pip install -r /usr/local/workspace/requirements.txt
 
 COPY natgeo-dams-1e56a9f3ab62.json /usr/local/workspace/
 COPY natgeo_dams_model_resnet50_csv_64.h5 /usr/local/workspace/
-COPY tensorflow_inference_server.py /usr/local/workspace/
 COPY start_inference_server.sh /usr/local/workspace/
+COPY tensorflow_inference_server.py /usr/local/workspace/
 
 WORKDIR /usr/local/workspace
 ENTRYPOINT [ "bash", "start_inference_server.sh" ]
