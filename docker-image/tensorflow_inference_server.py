@@ -13,6 +13,7 @@ import os
 import shutil
 import sys
 import threading
+import time
 
 from flask import Flask
 from osgeo import gdal
@@ -151,6 +152,7 @@ def do_inference_worker(model):
         QUAD_AVAILBLE_EVENT.wait(5.0)
         if not URL_TO_PROCESS_LIST:
             continue
+        start_time = time.time()
         quad_url = URL_TO_PROCESS_LIST.pop()
         QUAD_URL_TO_STATUS_MAP[quad_url] = 'processing'
         quad_raster_path = os.path.join(
@@ -194,13 +196,10 @@ def do_inference_worker(model):
                     if keras.backend.image_data_format() == 'channels_first':
                         image = image.transpose((2, 0, 1))
 
-                    LOGGER.debug('run inference on image %s', quad_png_path)
                     result = model.predict_on_batch(
                         numpy.expand_dims(image, axis=0))
                     os.remove(quad_png_path)
                     # correct boxes for image scale
-                    LOGGER.debug('inference complete')
-                    LOGGER.debug('results: ' + str(result))
                     boxes, scores, labels = result
                     boxes /= scale
 
@@ -232,13 +231,13 @@ def do_inference_worker(model):
                     LOGGER.exception('error on processing image')
                     return str(e), 500
         quad_png_path = '%s.png' % os.path.splitext(quad_raster_path)[0]
-        make_quad_png(
-            quad_raster_path, quad_png_path, 0, 0, None, None)
-        render_bounding_boxes(non_max_supression_box_list, quad_png_path)
+        # make_quad_png(
+        #     quad_raster_path, quad_png_path, 0, 0, None, None)
+        # render_bounding_boxes(non_max_supression_box_list, quad_png_path)
         # TODO: store the result in QUAD_URL_TO_STATUS_MAP
         # TODO: delete the quad
         LOGGER.info('done processing quad %s', quad_raster_path)
-        LOGGER.debug(non_max_supression_box_list)
+        LOGGER.debug('took %s seconds', str(time.time()-start_time))
         if len(URL_TO_PROCESS_LIST) == 0:
             QUAD_AVAILBLE_EVENT.clear()
 
