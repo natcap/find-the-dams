@@ -340,10 +340,15 @@ if __name__ == '__main__':
     parser.add_argument('tensorflow_model_path', help='path to frozen model')
     parser.add_argument(
         '--app_port', default=80, help='server port')
+    parser.add_argument('--gpu', help='which GPU to use')
     args = parser.parse_args()
 
     check_keras_version()
     check_tf_version()
+
+    # optionally choose specific GPU
+    if args.gpu:
+        setup_gpu(args.gpu)
 
     LOGGER.info(f'loading {args.tensorflow_model_path}')
     model = models.load_model(args.tensorflow_model_path, backbone_name='resnet50')
