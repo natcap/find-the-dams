@@ -157,6 +157,7 @@ def quad_processor(quad_offset_queue, quad_file_path_queue):
             make_quad_png(
                 quad_raster_path, quad_png_path,
                 xoff, yoff, win_xsize, win_ysize)
+            quad_file_path_queue.put(quad_png_path)
     except Exception:
         LOGGER.exception('error occured on quad processor')
         raise
@@ -205,52 +206,52 @@ def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
                             (quad_png_path, quad_raster_path,
                              xoff, yoff, win_xsize, win_ysize))
 
-                while True:
-                    payload = quad_file_path_queue.get()
-                    if payload == 'STOP':
-                        break
-                    quad_png_path = payload
-                    raw_image = numpy.asarray(PIL.Image.open(
-                        quad_png_path).convert('RGB'))[:, :, ::-1].copy()
-                    image = (
-                        raw_image.astype(numpy.float32) - [
-                            103.939, 116.779, 123.68])
-                    scale = compute_resize_scale(
-                        image.shape, min_side=800, max_side=1333)
-                    image = cv2.resize(image, None, fx=scale, fy=scale)
-                    if keras.backend.image_data_format() == 'channels_first':
-                        image = image.transpose((2, 0, 1))
+            while True:
+                payload = quad_file_path_queue.get()
+                if payload == 'STOP':
+                    break
+                quad_png_path = payload
+                raw_image = numpy.asarray(PIL.Image.open(
+                    quad_png_path).convert('RGB'))[:, :, ::-1].copy()
+                image = (
+                    raw_image.astype(numpy.float32) - [
+                        103.939, 116.779, 123.68])
+                scale = compute_resize_scale(
+                    image.shape, min_side=800, max_side=1333)
+                image = cv2.resize(image, None, fx=scale, fy=scale)
+                if keras.backend.image_data_format() == 'channels_first':
+                    image = image.transpose((2, 0, 1))
 
-                    result = model.predict_on_batch(
-                        numpy.expand_dims(image, axis=0))
-                    os.remove(quad_png_path)
-                    # correct boxes for image scale
-                    boxes, scores, labels = result
-                    boxes /= scale
+                result = model.predict_on_batch(
+                    numpy.expand_dims(image, axis=0))
+                os.remove(quad_png_path)
+                # correct boxes for image scale
+                boxes, scores, labels = result
+                boxes /= scale
 
-                    # convert box to a list from a numpy array and score to a value
-                    # from a single element array
-                    box_score_tuple_list = [
-                        (list(box), score) for box, score in zip(
-                            boxes[0], scores[0]) if score > 0.3]
-                    local_box_list = []
-                    while box_score_tuple_list:
-                        box, score = box_score_tuple_list.pop()
-                        shapely_box = shapely.geometry.box(*box)
-                        keep = True
-                        # this list makes a copy
-                        for test_box, test_score in list(box_score_tuple_list):
-                            shapely_test_box = shapely.geometry.box(*test_box)
-                            if shapely_test_box.intersects(shapely_box):
-                                if test_score > score:
-                                    # keep the new one
-                                    keep = False
-                                    break
-                        if keep:
-                            local_box_list.append([
-                                box[0]+xoff, box[1]+yoff,
-                                box[2]+xoff, box[3]+yoff])
-                    non_max_supression_box_list.extend(local_box_list)
+                # convert box to a list from a numpy array and score to a value
+                # from a single element array
+                box_score_tuple_list = [
+                    (list(box), score) for box, score in zip(
+                        boxes[0], scores[0]) if score > 0.3]
+                local_box_list = []
+                while box_score_tuple_list:
+                    box, score = box_score_tuple_list.pop()
+                    shapely_box = shapely.geometry.box(*box)
+                    keep = True
+                    # this list makes a copy
+                    for test_box, test_score in list(box_score_tuple_list):
+                        shapely_test_box = shapely.geometry.box(*test_box)
+                        if shapely_test_box.intersects(shapely_box):
+                            if test_score > score:
+                                # keep the new one
+                                keep = False
+                                break
+                    if keep:
+                        local_box_list.append([
+                            box[0]+xoff, box[1]+yoff,
+                            box[2]+xoff, box[3]+yoff])
+                non_max_supression_box_list.extend(local_box_list)
 
             #quad_png_path = '%s.png' % os.path.splitext(quad_raster_path)[0]
             # make_quad_png(
