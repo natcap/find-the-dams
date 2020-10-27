@@ -92,42 +92,19 @@ LAST_ACCESSED_SESSION_MAP = {}
 CLEANUP_WAIT_TIME = 60.0
 
 
-def render_image_and_finalize(inference_worker_payload_queue):
+def render_bounding_boxes:
     """Take a payload and render the image and update the session manager."""
-    while True:
-        try:
-            (bb_box_list, png_path), session_id = (
-                inference_worker_payload_queue.get())
-            image = PIL.Image.open(png_path).convert("RGB")
-            bb_list = []
-            image_draw = PIL.ImageDraw.Draw(image)
-            for box in bb_box_list:
-                image_draw.rectangle(box.bounds, outline='RED')
-                ul_corner = (float(box.bounds[0]), float(box.bounds[1]))
-                lr_corner = (float(box.bounds[2]), float(box.bounds[3]))
-                bb_list.append((ul_corner, lr_corner))
-            del image_draw
-            annotated_path = os.path.join(
-                ANNOTATED_IMAGE_DIR,
-                '%s_annotated%s' % os.path.splitext(
-                    os.path.basename(png_path)))
-            image.save(annotated_path)
-            LOGGER.debug('saved to %s', annotated_path)
-
-            with SESSION_MANAGER_LOCK:
-                SESSION_MANAGER_MAP[session_id] = {
-                    'status': 'complete',
-                    'annotated_png_filename': os.path.basename(
-                        annotated_path),
-                    'bounding_box_list': bb_list,
-                    'http_status_code': 200,
-                }
-                LAST_ACCESSED_SESSION_MAP[session_id]['last_time'] = (
-                    time.time())
-                LAST_ACCESSED_SESSION_MAP[session_id]['file_list'].append(
-                    annotated_path)
-        except Exception:
-            LOGGER.exception('exception in render_image_and_finalize')
+    image = PIL.Image.open(png_path).convert("RGB")
+    bb_list = []
+    image_draw = PIL.ImageDraw.Draw(image)
+    for box in bb_box_list:
+        image_draw.rectangle(box.bounds, outline='RED')
+        ul_corner = (float(box.bounds[0]), float(box.bounds[1]))
+        lr_corner = (float(box.bounds[2]), float(box.bounds[3]))
+        bb_list.append((ul_corner, lr_corner))
+    del image_draw
+    image.save(png_path)
+    LOGGER.debug('saved to %s', png_path)
 
 
 # WORK_STATUS maps quad url to a 'idle', 'working', 'error', or list result
@@ -266,8 +243,9 @@ def do_inference_worker(model):
                     # convert box to a list from a numpy array and score to a value
                     # from a single element array
                     box_score_tuple_list = [
-                        (list(box), score) for box, score in zip(boxes[0], scores[0])
-                        if score > 0.3]
+                        (list(box), score) for box, score in zip(
+                            boxes[0], scores[0]) if score > 0.3]
+                    local_box_list = []
                     while box_score_tuple_list:
                         box, score = box_score_tuple_list.pop()
                         shapely_box = shapely.geometry.box(*box)
@@ -281,8 +259,11 @@ def do_inference_worker(model):
                                     keep = False
                                     break
                         if keep:
-                            non_max_supression_box_list.append((
-                                [float(x) for x in box], float(score)))
+                            local_box_list.append([float(x) for x in box])
+                    non_max_supression_box_list.extend(local_box_list)
+
+                    render_bounding_boxes(
+                        local_box_list, quad_png_path)
 
                 except Exception as e:
                     LOGGER.exception('error on processing image')
