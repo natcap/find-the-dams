@@ -292,6 +292,7 @@ def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
                 'inference time %s sec', str(time.time()-inference_time))
             bb_transform_time = time.time()
             lat_lng_bb_list = []
+            first_report = True
             for bounding_box in non_max_supression_box_list:
                 coord_list = []
                 for index in [0, 2]:
@@ -299,6 +300,14 @@ def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
                         gdal.ApplyGeoTransform(
                             quad_info['geotransform'],
                             bounding_box[index], bounding_box[index+1]))
+                if first_report:
+                    LOGGER.info(
+                        '%s: %s -> %s' % (
+                            str(quad_info['geotransform']),
+                            str(bounding_box),
+                            str(coord_list)))
+                    first_report = False
+
                 lat_lng_bb_list.append(coord_list)
             QUAD_URL_TO_STATUS_MAP[quad_url] = lat_lng_bb_list
             LOGGER.info(
