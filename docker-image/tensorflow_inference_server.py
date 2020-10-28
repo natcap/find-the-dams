@@ -263,7 +263,7 @@ def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
                     str(len(box_score_tuple_list)))
 
             while box_score_tuple_list:
-                , score = box_score_tuple_list.pop()
+                box, score = box_score_tuple_list.pop()
                 shapely_box = shapely.geometry.box(*box)
                 keep = True
                 # this list makes a copy
