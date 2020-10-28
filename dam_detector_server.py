@@ -220,14 +220,13 @@ class Worker(object):
         """Send a job to the worker."""
         worker_rest_url = (
             f'http://{self.worker_ip}:{self.port}/do_inference')
-        self.job_payload = job_payload
         response = requests.post(
-            worker_rest_url, json={'quad_uri': self.job_payload})
+            worker_rest_url, json={'quad_uri': job_payload})
         if not response:
             raise RuntimeError(f'something went wrong {response.text}')
         self.active = True
 
-    def get_status(self):
+    def get_status(self, job_payload):
         """Return 'idle', 'processing', 'complete', 'error'."""
         if not self.active:
             raise RuntimeError(
@@ -235,15 +234,15 @@ class Worker(object):
         worker_rest_url = (
             f'http://{self.worker_ip}:{self.port}/job_status')
         response = requests.post(
-            worker_rest_url, json={'quad_uri': self.job_payload})
+            worker_rest_url, json={'quad_uri': job_payload})
         return response.json()['status']
 
-    def get_result(self):
+    def get_result(self, job_payload):
         """Return result if complete."""
         worker_rest_url = (
             f'http://{self.worker_ip}:{self.port}/get_result')
         response = requests.post(
-            worker_rest_url, json={'quad_uri': self.job_payload})
+            worker_rest_url, json={'quad_uri': job_payload})
         if response:
             LOGGER.debug(f'got {response.json()} for {self.job_payload}')
             return response.json()
@@ -296,7 +295,7 @@ def work_manager(quad_vector_path, update_interval=5.0):
                 free_worker = available_workers.pop()
                 jobs_to_add = (
                     JOBS_PER_WORKER -
-                    len(worker_to_payload_list_map[global_worker]))
+                    len(worker_to_payload_list_map[free_worker]))
                 try:
                     for _ in range(jobs_to_add):
                         payload = unprocessed_fid_uri_list.pop()
@@ -314,21 +313,22 @@ def work_manager(quad_vector_path, update_interval=5.0):
             while worker_to_payload_list_map:
                 scheduled_worker, payload_list = (
                     worker_to_payload_list_map.popitem())
+                LOGGER.debug(f'*** scheduled worker payload list: {scheduled_worker} {payload_list}')
                 while payload_list:
-                    payload = payload_list.pop(0)
+                    job_payload = payload_list.pop(0)
                     try:
-                        status = scheduled_worker.get_status()
+                        status = scheduled_worker.get_status(job_payload[1])
                     except Exception:
                         LOGGER.exception(f'{scheduled_worker} failed')
                         status = 'error'
                     if status == 'error':
-                        LOGGER.error(f'{scheduled_worker} failed on job {payload}')
-                        unprocessed_fid_uri_list.append(payload)
+                        LOGGER.error(f'{scheduled_worker} failed on job {job_payload}')
+                        unprocessed_fid_uri_list.append(job_payload)
                     elif status == 'complete':
                         # If job is complete, process result and put the
                         # free worker back in the free worker pool
-                        payload = scheduled_worker.get_result()
-                        LOGGER.debug(f'result: {payload}')
+                        payload = scheduled_worker.get_result(job_payload[1])
+                        LOGGER.debug(f'{job_payload} COMPLETE result: {payload}')
 
                         LOGGER.info(
                             f"Update {DATABASE_PATH} With Completed Quad "
@@ -362,10 +362,11 @@ def work_manager(quad_vector_path, update_interval=5.0):
                     else:
                         LOGGER.info(
                             f'status for {scheduled_worker} is {status} '
-                            f'({payload})')
+                            f'({job_payload})')
                         worker_to_payload_map_swap[scheduled_worker].append(
-                            payload)
+                            job_payload)
             # swap back any remaining workers
+            LOGGER.debug(f'swapping back {worker_to_payload_map_swap}')
             worker_to_payload_map = worker_to_payload_map_swap
 
             if (len(unprocessed_fid_uri_list) == 0 and
