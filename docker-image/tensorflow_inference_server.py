@@ -295,7 +295,7 @@ def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
             lat_lng_bb_list = []
             first_report = True
             local_srs = osr.SpatialReference()
-            local_srs.ImportFromWkt(quad_info['projection'])
+            local_srs.ImportFromWkt(quad_info['projection_wkt'])
 
             local_to_wgs84 = osr.CoordinateTransformation(local_srs, wgs84_srs)
             for bounding_box in non_max_supression_box_list:
