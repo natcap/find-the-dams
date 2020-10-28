@@ -282,8 +282,15 @@ def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
             lat_lng_bb_list = []
             for bounding_box in non_max_supression_box_list:
                 LOGGER.info('base bounding_box: ' + str(bounding_box))
+                local_coord_bb = []
+                for offset in [0, 2]:
+                    coords = list(gdal.ApplyGeoTransform(
+                        quad_info['geotransform'],
+                        bounding_box[0+offset],
+                        bounding_box[1+offset]))
+                    local_coord_bb.extend(coords)
                 transformed_bb = pygeoprocessing.transform_bounding_box(
-                    bounding_box, quad_info['projection_wkt'],
+                    local_coord_bb, quad_info['projection_wkt'],
                     wgs84_srs.ExportToWkt())
                 LOGGER.info('transformed bb: ' + str(transformed_bb))
                 lat_lng_bb_list.append(transformed_bb)
