@@ -317,23 +317,21 @@ def work_manager(quad_vector_path, update_interval=5.0):
                     # free worker back in the free worker pool
                     payload = scheduled_worker.get_result()
                     LOGGER.debug(f'result: {payload}')
-                    continue
-                    # payload['quad_url']
-                    # payload['dam_bounding_box_list']
-                    #    [(lng_min, lat_min, lng_max, lat_max), ...]
 
                     LOGGER.info(
                         f"Update {DATABASE_PATH} With Completed Quad "
                         f"{payload['quad_uri']} "
                         f"{payload['dam_bounding_box_list']}")
-                    _execute_sqlite(
-                        '''
-                        INSERT INTO detected_dams
-                            (lng_min, lat_min, lng_max, lat_max, probability, country_list, image_uri)
-                        VALUES(?, ?, ?, ?, -1, '', '');
-                        ''', DATABASE_PATH,
-                        argument_list=payload['dam_bounding_box_list'],
-                        execute='many')
+                    if payload['dam_bounding_box_list']:
+                        _execute_sqlite(
+                            '''
+                            INSERT INTO detected_dams
+                                (lng_min, lat_min, lng_max, lat_max,
+                                 probability, country_list, image_uri)
+                            VALUES(?, ?, ?, ?, -1, '', '');
+                            ''', DATABASE_PATH,
+                            argument_list=payload['dam_bounding_box_list'],
+                            execute='many')
 
                     LOGGER.info(
                         f"Update Planet Quad Vector {payload['quad_uri']}")
@@ -345,8 +343,8 @@ def work_manager(quad_vector_path, update_interval=5.0):
                         quad_uri_to_fid[payload['quad_uri']])
                     quad_feature.SetField('processed', 1)
                     quad_layer.SetFeature(quad_feature)
-                    quad_layer.CommitTransaction()
                     quad_feature = None
+                    quad_layer.CommitTransaction()
                     quad_layer = None
                     quad_vector = None
                 else:
