@@ -111,7 +111,7 @@ def make_quad_png(
         quad_raster_path, quad_png_path, xoff, yoff, win_xsize, win_ysize):
     """Make a PNG out of a geotiff.
 
-    Parameters:
+    Args:
         quad_raster_path (str): path to target download location.
         quad_png_path (str): path to target png file.
         xoff (int): x offset to read quad array
@@ -256,56 +256,33 @@ def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
                 box_score_tuple_list = [
                     (list(box), score) for box, score in zip(
                         boxes[0], scores[0]) if score > 0.3]
-                local_box_list = []
-                while box_score_tuple_list:
-                    box, score = box_score_tuple_list.pop()
-                    shapely_box = shapely.geometry.box(*box)
-                    keep = True
-                    # this list makes a copy
-                    for test_box, test_score in list(box_score_tuple_list):
-                        shapely_test_box = shapely.geometry.box(*test_box)
-                        if shapely_test_box.intersects(shapely_box):
-                            if test_score > score:
-                                # keep the new one
-                                keep = False
-                                break
-                    if keep:
-                        local_box_list.append([
-                            box[0]+xoff, box[1]+yoff,
-                            box[2]+xoff, box[3]+yoff])
-                non_max_supression_box_list.extend(local_box_list)
+            while box_score_tuple_list:
+                box, score = box_score_tuple_list.pop()
+                shapely_box = shapely.geometry.box(*box)
+                keep = True
+                # this list makes a copy
+                for test_box, test_score in list(box_score_tuple_list):
+                    shapely_test_box = shapely.geometry.box(*test_box)
+                    if shapely_test_box.intersects(shapely_box):
+                        if test_score > score:
+                            # keep the new one
+                            keep = False
+                            break
+                if keep:
+                    non_max_supression_box_list.append([
+                        box[0]+xoff, box[1]+yoff,
+                        box[2]+xoff, box[3]+yoff])
 
             #quad_png_path = '%s.png' % os.path.splitext(quad_raster_path)[0]
             # make_quad_png(
             #     quad_raster_path, quad_png_path, 0, 0, None, None)
             # render_bounding_boxes(non_max_supression_box_list, quad_png_path)
             lat_lng_bb_list = []
-            first_report = True
-            local_srs = osr.SpatialReference()
-            local_srs.ImportFromWkt(quad_info['projection_wkt'])
-
-            local_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
-            wgs84_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
-            local_to_wgs84 = osr.CoordinateTransformation(local_srs, wgs84_srs)
             for bounding_box in non_max_supression_box_list:
-                coord_list = []
-                for index in [0, 2]:
-                    point = ogr.Geometry(ogr.wkbPoint)
-                    point.AddPoint(
-                        *gdal.ApplyGeoTransform(
-                            quad_info['geotransform'],
-                            bounding_box[index], bounding_box[index+1]))
-                    point.Transform(local_to_wgs84)
-                    coord_list.extend([point.GetX(), point.GetY()])
-                if first_report:
-                    LOGGER.info(
-                        '%s: %s -> %s' % (
-                            str(quad_info['geotransform']),
-                            str(bounding_box),
-                            str(coord_list)))
-                    first_report = False
-
-                lat_lng_bb_list.append(coord_list)
+                transformed_bb = pygeoprocessing.transform_bounding_box(
+                    bounding_box, quad_info['projection_wkt'],
+                    wgs84_srs.ExportToWkt())
+                lat_lng_bb_list.append(transformed_bb)
             QUAD_URI_TO_STATUS_MAP[quad_uri] = lat_lng_bb_list
             LOGGER.info(
                 'done processing quad %s took %ss',
