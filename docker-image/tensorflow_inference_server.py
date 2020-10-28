@@ -324,12 +324,10 @@ def do_inference():
     try:
         LOGGER.debug(flask.request.json)
         quad_uri = flask.request.json['quad_uri']
-
-        if quad_uri in QUAD_URI_TO_STATUS_MAP:
-            return quad_uri + ' already scheduled', 500
-        QUAD_URI_TO_STATUS_MAP[quad_uri] = 'scheduled'
-        URI_TO_PROCESS_LIST.append(quad_uri)
-        QUAD_AVAILBLE_EVENT.set()
+        if quad_uri not in QUAD_URI_TO_STATUS_MAP:
+            QUAD_URI_TO_STATUS_MAP[quad_uri] = 'scheduled'
+            URI_TO_PROCESS_LIST.append(quad_uri)
+            QUAD_AVAILBLE_EVENT.set()
         return quad_uri + ' is scheduled'
     except Exception:
         LOGGER.exception('something went wrong')

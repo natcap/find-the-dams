@@ -222,7 +222,7 @@ class Worker(object):
         response = requests.post(
             worker_rest_url, json={'quad_uri': self.job_payload})
         if not response:
-            raise RuntimeError(f'something went wrong {response}')
+            raise RuntimeError(f'something went wrong {response.text}')
         self.active = True
 
     def get_status(self):
