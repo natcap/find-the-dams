@@ -281,11 +281,11 @@ def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
             # render_bounding_boxes(non_max_supression_box_list, quad_png_path)
             lat_lng_bb_list = []
             for bounding_box in non_max_supression_box_list:
-                LOGGER.debug('base bounding_box: ' + str(bounding_box))
+                LOGGER.info('base bounding_box: ' + str(bounding_box))
                 transformed_bb = pygeoprocessing.transform_bounding_box(
                     bounding_box, quad_info['projection_wkt'],
                     wgs84_srs.ExportToWkt())
-                LOGGER.debug('transformed bb: ' + str(transformed_bb))
+                LOGGER.info('transformed bb: ' + str(transformed_bb))
                 lat_lng_bb_list.append(transformed_bb)
             QUAD_URI_TO_STATUS_MAP[quad_uri] = lat_lng_bb_list
             LOGGER.info(
