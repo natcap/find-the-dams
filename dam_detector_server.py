@@ -220,7 +220,7 @@ class Worker(object):
             f'http://{self.worker_ip}:{self.port}/do_inference')
         self.job_payload = job_payload
         response = requests.post(
-            worker_rest_url, json={'quad_url': self.job_payload})
+            worker_rest_url, json={'quad_uri': self.job_payload})
         if not response:
             raise RuntimeError(f'something went wrong {response}')
         self.active = True
@@ -233,7 +233,7 @@ class Worker(object):
         worker_rest_url = (
             f'http://{self.worker_ip}:{self.port}/job_status')
         response = requests.post(
-            worker_rest_url, json={'quad_url': self.job_payload})
+            worker_rest_url, json={'quad_uri': self.job_payload})
         return response.json()['status']
 
     def get_result(self):
@@ -241,7 +241,7 @@ class Worker(object):
         worker_rest_url = (
             f'http://{self.worker_ip}:{self.port}/get_result')
         response = requests.post(
-            worker_rest_url, json={'quad_url': self.job_payload})
+            worker_rest_url, json={'quad_uri': self.job_payload})
         if response:
             LOGGER.debug(f'got {response.json()} for {self.job_payload}')
             return response.json()
@@ -261,7 +261,7 @@ def work_manager(quad_vector_path, update_interval=5.0):
     """
     available_workers = set()
     worker_to_payload_map = dict()
-    quad_url_to_fid = {}
+    quad_uri_to_fid = {}
 
     # load quads to process to get fid & uri field
     unprocessed_fid_uri_list = []
@@ -271,9 +271,10 @@ def work_manager(quad_vector_path, update_interval=5.0):
     LOGGER.info('building work list')
     for quad_feature in quad_layer:
         fid = quad_feature.GetFID()
-        quad_uri = quad_feature.GetField('quad_uri')
+        quad_url = quad_feature.GetField('quad_uri')
+        quad_uri = quad_url.replace('https://storage.googleapis.com/', 'gs://')
         unprocessed_fid_uri_list.append((fid, quad_uri))
-        quad_url_to_fid[quad_uri] = fid
+        quad_uri_to_fid[quad_uri] = fid
     LOGGER.info(f'{len(unprocessed_fid_uri_list)} quads to process')
 
     try:
@@ -307,8 +308,8 @@ def work_manager(quad_vector_path, update_interval=5.0):
                     status = scheduled_worker.get_status()
                 except Exception:
                     LOGGER.exception(f'{scheduled_worker} failed')
-                    status = 'failed'
-                if status == 'failed':
+                    status = 'error'
+                if status == 'error':
                     LOGGER.error(f'{scheduled_worker} failed on job {payload}')
                     unprocessed_fid_uri_list.append(payload)
                 elif status == 'complete':
@@ -323,7 +324,7 @@ def work_manager(quad_vector_path, update_interval=5.0):
 
                     LOGGER.info(
                         f"Update {DATABASE_PATH} With Completed Quad "
-                        f"{payload['quad_url']} "
+                        f"{payload['quad_uri']} "
                         f"{payload['dam_bounding_box_list']}")
                     _execute_sqlite(
                         '''
@@ -335,12 +336,12 @@ def work_manager(quad_vector_path, update_interval=5.0):
                         execute='many')
 
                     LOGGER.info(
-                        f"Update Planet Quad Vector {payload['quad_url']}")
+                        f"Update Planet Quad Vector {payload['quad_uri']}")
                     quad_vector = gdal.OpenEx(
                         quad_vector_path, gdal.OF_VECTOR | gdal.GA_Update)
                     quad_layer = quad_vector.GetLayer()
                     quad_feature = quad_layer.GetFeature(
-                        quad_url_to_fid[payload['quad_url']])
+                        quad_uri_to_fid[payload['quad_uri']])
                     quad_feature.SetField('processed', 1)
                     quad_layer.SetFeature(quad_feature)
                     quad_feature = None
