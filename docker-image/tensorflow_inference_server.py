@@ -263,7 +263,7 @@ def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
                     str(len(box_score_tuple_list)))
 
             while box_score_tuple_list:
-                box, score = box_score_tuple_list.pop()
+                , score = box_score_tuple_list.pop()
                 shapely_box = shapely.geometry.box(*box)
                 keep = True
                 # this list makes a copy
@@ -275,9 +275,7 @@ def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
                             keep = False
                             break
                 if keep:
-                    non_max_supression_box_list.append([
-                        box[0]+xoff, box[1]+yoff,
-                        box[2]+xoff, box[3]+yoff])
+                    non_max_supression_box_list.append(box)
 
             #quad_png_path = '%s.png' % os.path.splitext(quad_raster_path)[0]
             # make_quad_png(
