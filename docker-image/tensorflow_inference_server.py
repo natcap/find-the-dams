@@ -161,7 +161,6 @@ def quad_processor(quad_offset_queue, quad_file_path_queue):
     try:
         while True:
             payload = quad_offset_queue.get()
-            start_time = time.time()
             (quad_png_path, quad_raster_path,
              xoff, yoff, win_xsize, win_ysize) = payload
             make_quad_png(
@@ -179,11 +178,7 @@ def quad_processor(quad_offset_queue, quad_file_path_queue):
                 image = image.transpose((2, 0, 1))
             image = numpy.expand_dims(image, axis=0)
             quad_file_path_queue.put((scale, image))
-            LOGGER.info(
-                'successful clip of ' + quad_png_path + ' took %ss' % (
-                    time.time()-start_time))
             os.remove(quad_png_path)
-
     except Exception:
         LOGGER.exception('error occured on quad processor')
         raise
@@ -248,15 +243,10 @@ def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
                          xoff, yoff, win_xsize, win_ysize))
 
             LOGGER.info('schedule inference of %s', quad_id)
-            inference_time = time.time()
             while quad_slice_index > 0:
                 quad_slice_index -= 1
                 scale, image = quad_file_path_queue.get()
-                start_time = time.time()
                 result = model.predict_on_batch(image)
-                LOGGER.info(
-                    'took %ss for iteration %d',
-                    str(time.time()-start_time), quad_slice_index)
                 # correct boxes for image scale
                 boxes, scores, labels = result
                 boxes /= scale
@@ -289,9 +279,6 @@ def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
             # make_quad_png(
             #     quad_raster_path, quad_png_path, 0, 0, None, None)
             # render_bounding_boxes(non_max_supression_box_list, quad_png_path)
-            LOGGER.info(
-                'inference time %s sec', str(time.time()-inference_time))
-            bb_transform_time = time.time()
             lat_lng_bb_list = []
             first_report = True
             local_srs = osr.SpatialReference()
@@ -318,9 +305,6 @@ def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
 
                 lat_lng_bb_list.append(coord_list)
             QUAD_URL_TO_STATUS_MAP[quad_url] = lat_lng_bb_list
-            LOGGER.info(
-                'took %ss to transform to lat/lng',
-                str(time.time()-bb_transform_time))
             LOGGER.info(
                 'done processing quad %s took %ss',
                 quad_raster_path, str(time.time()-start_time))
