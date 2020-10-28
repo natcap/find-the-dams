@@ -244,7 +244,7 @@ class Worker(object):
         response = requests.post(
             worker_rest_url, json={'quad_uri': job_payload})
         if response:
-            LOGGER.debug(f'got {response.json()} for {self.job_payload}')
+            LOGGER.debug(f'got {response.json()} for {job_payload}')
             return response.json()
         raise RuntimeError(f'bad response {response}')
 
@@ -367,10 +367,10 @@ def work_manager(quad_vector_path, update_interval=5.0):
                             job_payload)
             # swap back any remaining workers
             LOGGER.debug(f'swapping back {worker_to_payload_map_swap}')
-            worker_to_payload_map = worker_to_payload_map_swap
+            worker_to_payload_list_map = worker_to_payload_map_swap
 
             if (len(unprocessed_fid_uri_list) == 0 and
-                    len(worker_to_payload_map) == 0):
+                    len(worker_to_payload_list_map) == 0):
                 LOGGER.info('all done with work')
                 return
 
