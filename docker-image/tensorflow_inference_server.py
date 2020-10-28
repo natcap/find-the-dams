@@ -56,6 +56,7 @@ LOGGER = logging.getLogger(__name__)
 APP = Flask(__name__, static_url_path='', static_folder='')
 APP_ROOT = os.path.dirname(os.path.abspath(__file__))
 TRAINING_IMAGE_DIMS = (419, 419)
+HEALTHY = True
 
 
 def render_bounding_boxes(bb_box_list, png_path):
@@ -158,6 +159,7 @@ def quad_processor(quad_offset_queue, quad_file_path_queue):
     Returns:
         never.
     """
+    global HEALTHY
     try:
         while True:
             payload = quad_offset_queue.get()
@@ -181,6 +183,7 @@ def quad_processor(quad_offset_queue, quad_file_path_queue):
             os.remove(quad_png_path)
     except Exception:
         LOGGER.exception('error occured on quad processor')
+        HEALTHY = False
         raise
 
 
@@ -199,6 +202,7 @@ def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
     Returns:
         never
     """
+    global HEALTHY
     try:
         wgs84_srs = osr.SpatialReference()
         wgs84_srs.ImportFromEPSG(4326)
@@ -310,12 +314,23 @@ def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
         if subprocess_result:
             LOGGER.error(subprocess_result)
         QUAD_URI_TO_STATUS_MAP[quad_uri] = 'error'
+        HEALTHY = False
         raise
 
+
+@APP.route('/health_check', methods=['GET'])
+def health_check():
+    """Return 200 if healthy, 500 if not."""
+    global HEALTHY
+    if HEALTHY:
+        return 'healthy', 200
+    else:
+        return 'error', 500
 
 @APP.route('/do_inference', methods=['POST'])
 def do_inference():
     """Run dam inference on the posted quad."""
+    global HEALTHY
     try:
         LOGGER.debug(flask.request.json)
         quad_uri = flask.request.json['quad_uri']
@@ -326,6 +341,7 @@ def do_inference():
         return quad_uri + ' is scheduled'
     except Exception:
         LOGGER.exception('something went wrong')
+        HEALTHY = False
         raise
 
 
@@ -350,6 +366,7 @@ def job_status():
 def get_result():
     """Get the result for a given quad."""
     delivered = False
+    global HEALTHY
     try:
         quad_uri = flask.request.json['quad_uri']
         LOGGER.info('get result for ' + quad_uri)
@@ -364,6 +381,7 @@ def get_result():
             return quad_uri + ' not complete with status: ' + status, 500
     except Exception as e:
         LOGGER.exception('error on get result for ' + quad_uri)
+        HEALTHY = False
         return str(e), 500
     finally:
         if delivered:
