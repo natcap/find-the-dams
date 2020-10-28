@@ -162,6 +162,7 @@ def quad_processor(quad_offset_queue, quad_file_path_queue):
     try:
         while True:
             payload = quad_offset_queue.get()
+            start_time = time.time()
             (quad_png_path, quad_raster_path,
              xoff, yoff, win_xsize, win_ysize) = payload
             make_quad_png(
@@ -179,7 +180,9 @@ def quad_processor(quad_offset_queue, quad_file_path_queue):
                 image = image.transpose((2, 0, 1))
             image = numpy.expand_dims(image, axis=0)
             quad_file_path_queue.put((scale, image))
-            LOGGER.info('successful clip of ' + quad_png_path)
+            LOGGER.info(
+                'successful clip of ' + quad_png_path + ' took %ss' % (
+                    time.time()-start_time))
             os.remove(quad_png_path)
 
     except Exception:
@@ -393,17 +396,17 @@ if __name__ == '__main__':
     quad_offset_queue = queue.Queue()
     quad_file_path_queue = queue.Queue()
 
-    quad_processor_worker_thread = threading.Thread(
-        target=quad_processor,
-        args=(quad_offset_queue, quad_file_path_queue))
-    quad_processor_worker_thread.daemon = True
-    quad_processor_worker_thread.start()
-
     # make clipper workers
     for _ in range(8):
-        do_inference_worker_thread = threading.Thread(
-            target=do_inference_worker,
-            args=(model, quad_offset_queue, quad_file_path_queue))
-        do_inference_worker_thread.daemon = True
-        do_inference_worker_thread.start()
+        quad_processor_worker_thread = threading.Thread(
+            target=quad_processor,
+            args=(quad_offset_queue, quad_file_path_queue))
+        quad_processor_worker_thread.daemon = True
+        quad_processor_worker_thread.start()
+
+    do_inference_worker_thread = threading.Thread(
+        target=do_inference_worker,
+        args=(model, quad_offset_queue, quad_file_path_queue))
+    do_inference_worker_thread.daemon = True
+    do_inference_worker_thread.start()
     APP.run(host='0.0.0.0', port=args.app_port)
