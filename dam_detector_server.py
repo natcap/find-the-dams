@@ -1,6 +1,7 @@
 # coding=UTF-8
 """This server will manage a worker cloud."""
 import argparse
+import collections
 import json
 import logging
 import os
@@ -33,6 +34,7 @@ WORKSPACE_DIR = 'workspace'
 DATABASE_PATH = os.path.join(WORKSPACE_DIR, 'test_natgeo_dams_database_2020_07_01.db')
 
 DAM_INFERENCE_WORKER_KEY = 'dam_inference_worker'
+JOBS_PER_WORKER = 3
 
 APP = Flask(__name__, static_url_path='', static_folder='')
 
@@ -260,7 +262,7 @@ def work_manager(quad_vector_path, update_interval=5.0):
         None.
     """
     available_workers = set()
-    worker_to_payload_map = dict()
+    worker_to_payload_list_map = collections.defaultdict(list)
     quad_uri_to_fid = {}
 
     # load quads to process to get fid & uri field
@@ -284,16 +286,23 @@ def work_manager(quad_vector_path, update_interval=5.0):
             while local_global_workers:
                 global_worker = local_global_workers.pop()
                 if (global_worker not in available_workers and
-                        global_worker not in worker_to_payload_map):
+                        len(worker_to_payload_list_map[global_worker]) <
+                        JOBS_PER_WORKER):
+                    LOGGER.debug(f'adding {global_worker} to available_workers')
                     available_workers.add(global_worker)
 
             # Schedule any available work to the workers
             while available_workers and unprocessed_fid_uri_list:
-                payload = unprocessed_fid_uri_list.pop()
                 free_worker = available_workers.pop()
+                jobs_to_add = (
+                    JOBS_PER_WORKER -
+                    len(worker_to_payload_list_map[global_worker]))
                 try:
-                    free_worker.send_job(payload[1])
-                    worker_to_payload_map[free_worker] = payload
+                    for _ in range(jobs_to_add):
+                        payload = unprocessed_fid_uri_list.pop()
+                        LOGGER.debug(f'processing payload {payload}')
+                        free_worker.send_job(payload[1])
+                        worker_to_payload_list_map[free_worker].append(payload)
                 except Exception:
                     LOGGER.exception(
                         f'unable to send job {payload[1]} to {free_worker}')
@@ -301,57 +310,61 @@ def work_manager(quad_vector_path, update_interval=5.0):
 
             # This loop checks if any of the workers are done, processes that
             # work and puts the free workers back on the free queue
-            worker_to_payload_map_swap = dict()
-            while worker_to_payload_map:
-                scheduled_worker, payload = worker_to_payload_map.popitem()
-                try:
-                    status = scheduled_worker.get_status()
-                except Exception:
-                    LOGGER.exception(f'{scheduled_worker} failed')
-                    status = 'error'
-                if status == 'error':
-                    LOGGER.error(f'{scheduled_worker} failed on job {payload}')
-                    unprocessed_fid_uri_list.append(payload)
-                elif status == 'complete':
-                    # If job is complete, process result and put the
-                    # free worker back in the free worker pool
-                    payload = scheduled_worker.get_result()
-                    LOGGER.debug(f'result: {payload}')
+            worker_to_payload_map_swap = collections.defaultdict(list)
+            while worker_to_payload_list_map:
+                scheduled_worker, payload_list = (
+                    worker_to_payload_list_map.popitem())
+                while payload_list:
+                    payload = payload_list.pop(0)
+                    try:
+                        status = scheduled_worker.get_status()
+                    except Exception:
+                        LOGGER.exception(f'{scheduled_worker} failed')
+                        status = 'error'
+                    if status == 'error':
+                        LOGGER.error(f'{scheduled_worker} failed on job {payload}')
+                        unprocessed_fid_uri_list.append(payload)
+                    elif status == 'complete':
+                        # If job is complete, process result and put the
+                        # free worker back in the free worker pool
+                        payload = scheduled_worker.get_result()
+                        LOGGER.debug(f'result: {payload}')
 
-                    LOGGER.info(
-                        f"Update {DATABASE_PATH} With Completed Quad "
-                        f"{payload['quad_uri']} "
-                        f"{payload['dam_bounding_box_list']}")
-                    if payload['dam_bounding_box_list']:
-                        _execute_sqlite(
-                            '''
-                            INSERT INTO detected_dams
-                                (lng_min, lat_min, lng_max, lat_max,
-                                 probability, country_list, image_uri)
-                            VALUES(?, ?, ?, ?, -1, '', '');
-                            ''', DATABASE_PATH,
-                            argument_list=payload['dam_bounding_box_list'],
-                            execute='many')
+                        LOGGER.info(
+                            f"Update {DATABASE_PATH} With Completed Quad "
+                            f"{payload['quad_uri']} "
+                            f"{payload['dam_bounding_box_list']}")
+                        if payload['dam_bounding_box_list']:
+                            _execute_sqlite(
+                                '''
+                                INSERT INTO detected_dams
+                                    (lng_min, lat_min, lng_max, lat_max,
+                                     probability, country_list, image_uri)
+                                VALUES(?, ?, ?, ?, -1, '', '');
+                                ''', DATABASE_PATH,
+                                argument_list=payload['dam_bounding_box_list'],
+                                execute='many')
 
-                    LOGGER.info(
-                        f"Update Planet Quad Vector {payload['quad_uri']}")
-                    quad_vector = gdal.OpenEx(
-                        quad_vector_path, gdal.OF_VECTOR | gdal.GA_Update)
-                    quad_layer = quad_vector.GetLayer()
-                    quad_layer.StartTransaction()
-                    quad_feature = quad_layer.GetFeature(
-                        quad_uri_to_fid[payload['quad_uri']])
-                    quad_feature.SetField('processed', 1)
-                    quad_layer.SetFeature(quad_feature)
-                    quad_feature = None
-                    quad_layer.CommitTransaction()
-                    quad_layer = None
-                    quad_vector = None
-                else:
-                    LOGGER.info(
-                        f'status for {scheduled_worker} is {status} '
-                        f'({payload})')
-                    worker_to_payload_map_swap[scheduled_worker] = payload
+                        LOGGER.info(
+                            f"Update Planet Quad Vector {payload['quad_uri']}")
+                        quad_vector = gdal.OpenEx(
+                            quad_vector_path, gdal.OF_VECTOR | gdal.GA_Update)
+                        quad_layer = quad_vector.GetLayer()
+                        quad_layer.StartTransaction()
+                        quad_feature = quad_layer.GetFeature(
+                            quad_uri_to_fid[payload['quad_uri']])
+                        quad_feature.SetField('processed', 1)
+                        quad_layer.SetFeature(quad_feature)
+                        quad_feature = None
+                        quad_layer.CommitTransaction()
+                        quad_layer = None
+                        quad_vector = None
+                    else:
+                        LOGGER.info(
+                            f'status for {scheduled_worker} is {status} '
+                            f'({payload})')
+                        worker_to_payload_map_swap[scheduled_worker].append(
+                            payload)
             # swap back any remaining workers
             worker_to_payload_map = worker_to_payload_map_swap
 

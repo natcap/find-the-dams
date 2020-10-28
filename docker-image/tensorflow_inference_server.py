@@ -262,9 +262,6 @@ def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
                     ([box[0]+xoff, box[1]+yoff, box[2]+xoff, box[3]+yoff],
                      score) for box, score in zip(
                         boxes[0], scores[0]) if score > 0.3])
-                LOGGER.info(
-                    'len of box score tuple list: ' +
-                    str(len(box_score_tuple_list)))
 
             while box_score_tuple_list:
                 box, score = box_score_tuple_list.pop()
