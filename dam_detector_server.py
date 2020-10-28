@@ -340,10 +340,12 @@ def work_manager(quad_vector_path, update_interval=5.0):
                     quad_vector = gdal.OpenEx(
                         quad_vector_path, gdal.OF_VECTOR | gdal.GA_Update)
                     quad_layer = quad_vector.GetLayer()
+                    quad_layer.StartTransaction()
                     quad_feature = quad_layer.GetFeature(
                         quad_uri_to_fid[payload['quad_uri']])
                     quad_feature.SetField('processed', 1)
                     quad_layer.SetFeature(quad_feature)
+                    quad_layer.CommitTransaction()
                     quad_feature = None
                     quad_layer = None
                     quad_vector = None
