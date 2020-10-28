@@ -221,8 +221,6 @@ def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
                 '/usr/local/gcloud-sdk/google-cloud-sdk/bin/gsutil cp '
                 '"%s" %s' % (quad_uri, quad_raster_path), check=True,
                 shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            LOGGER.info('process cuts of quad ' + quad_raster_path)
-
             quad_info = pygeoprocessing.get_raster_info(quad_raster_path)
             n_cols, n_rows = quad_info['raster_size']
             quad_id = os.path.basename(os.path.splitext(quad_raster_path)[0])
@@ -282,12 +280,8 @@ def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
             # make_quad_png(
             #     quad_raster_path, quad_png_path, 0, 0, None, None)
             # render_bounding_boxes(non_max_supression_box_list, quad_png_path)
-            LOGGER.info(
-                'length of non-max-suppression-box-list: ' +
-                str(len(non_max_supression_box_list)))
             lat_lng_bb_list = []
             for bounding_box in non_max_supression_box_list:
-                LOGGER.info('base bounding_box: ' + str(bounding_box))
                 local_coord_bb = []
                 for offset in [0, 2]:
                     coords = list(gdal.ApplyGeoTransform(
@@ -298,7 +292,6 @@ def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
                 transformed_bb = pygeoprocessing.transform_bounding_box(
                     local_coord_bb, quad_info['projection_wkt'],
                     wgs84_srs.ExportToWkt())
-                LOGGER.info('transformed bb: ' + str(transformed_bb))
                 lat_lng_bb_list.append(transformed_bb)
             QUAD_URI_TO_STATUS_MAP[quad_uri] = lat_lng_bb_list
             LOGGER.info(
