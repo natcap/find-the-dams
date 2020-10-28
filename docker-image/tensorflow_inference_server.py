@@ -19,6 +19,7 @@ import time
 
 from flask import Flask
 from osgeo import gdal
+from osgeo import ogr
 from osgeo import osr
 import cv2
 import flask
@@ -293,13 +294,20 @@ def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
             bb_transform_time = time.time()
             lat_lng_bb_list = []
             first_report = True
+            local_srs = osr.SpatialReference()
+            local_srs.ImportFromWkt(quad_info['projection'])
+
+            local_to_wgs84 = osr.CoordinateTransformation(local_srs, wgs84_srs)
             for bounding_box in non_max_supression_box_list:
                 coord_list = []
                 for index in [0, 2]:
-                    coord_list.extend(
-                        gdal.ApplyGeoTransform(
+                    point = ogr.Geometry(ogr.wkbPoint)
+                    point.Transform(local_to_wgs84)
+                    point.AddPoint(
+                        *gdal.ApplyGeoTransform(
                             quad_info['geotransform'],
                             bounding_box[index], bounding_box[index+1]))
+                    coord_list.extend([point.GetX(), point.GetY()])
                 if first_report:
                     LOGGER.info(
                         '%s: %s -> %s' % (
