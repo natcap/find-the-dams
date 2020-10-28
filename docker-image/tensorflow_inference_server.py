@@ -321,15 +321,19 @@ def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
 @APP.route('/do_inference', methods=['POST'])
 def do_inference():
     """Run dam inference on the posted quad."""
-    LOGGER.debug(flask.request.json)
-    quad_uri = flask.request.json['quad_uri']
+    try:
+        LOGGER.debug(flask.request.json)
+        quad_uri = flask.request.json['quad_uri']
 
-    if quad_uri in QUAD_URI_TO_STATUS_MAP:
-        return quad_uri + ' already scheduled', 500
-    QUAD_URI_TO_STATUS_MAP[quad_uri] = 'scheduled'
-    URI_TO_PROCESS_LIST.append(quad_uri)
-    QUAD_AVAILBLE_EVENT.set()
-    return quad_uri + ' is scheduled'
+        if quad_uri in QUAD_URI_TO_STATUS_MAP:
+            return quad_uri + ' already scheduled', 500
+        QUAD_URI_TO_STATUS_MAP[quad_uri] = 'scheduled'
+        URI_TO_PROCESS_LIST.append(quad_uri)
+        QUAD_AVAILBLE_EVENT.set()
+        return quad_uri + ' is scheduled'
+    except Exception:
+        LOGGER.exception('something went wrong')
+        raise
 
 
 @APP.route('/job_status', methods=['POST'])
