@@ -205,7 +205,7 @@ def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
     try:
         wgs84_srs = osr.SpatialReference()
         wgs84_srs.ImportFromEPSG(4326)
-
+        subprocess_result = None
         while True:
             QUAD_AVAILBLE_EVENT.wait(5.0)
             if not URL_TO_PROCESS_LIST:
@@ -216,8 +216,9 @@ def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
             quad_raster_path = os.path.join(
                 WORKSPACE_DIR, os.path.basename(quad_url))
             LOGGER.info('download ' + quad_url + ' to ' + quad_raster_path)
-            subprocess.run(
-                'gsutil cp "%s" .' % quad_url, check=True, shell=True)
+            subprocess_result = subprocess.run(
+                'gsutil cp "%s" .' % quad_url, check=True, shell=True,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
             LOGGER.info('process cuts of quad ' + quad_raster_path)
 
@@ -309,6 +310,8 @@ def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
                 QUAD_AVAILBLE_EVENT.clear()
     except Exception:
         LOGGER.exception('error occured on inference worker')
+        if subprocess_result:
+            LOGGER.error(subprocess_result)
         QUAD_URL_TO_STATUS_MAP[quad_url] = 'error'
         raise
 
