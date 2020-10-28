@@ -243,6 +243,7 @@ def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
                          xoff, yoff, win_xsize, win_ysize))
 
             LOGGER.info('schedule inference of %s', quad_id)
+            box_score_tuple_list = []
             while quad_slice_index > 0:
                 quad_slice_index -= 1
                 scale, image = quad_file_path_queue.get()
@@ -253,9 +254,10 @@ def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
 
                 # convert box to a list from a numpy array and score to a value
                 # from a single element array
-                box_score_tuple_list = [
+                box_score_tuple_list.extend([
                     (list(box), score) for box, score in zip(
-                        boxes[0], scores[0]) if score > 0.3]
+                        boxes[0], scores[0]) if score > 0.3])
+
             while box_score_tuple_list:
                 box, score = box_score_tuple_list.pop()
                 shapely_box = shapely.geometry.box(*box)
