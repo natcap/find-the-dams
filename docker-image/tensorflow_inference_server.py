@@ -75,8 +75,8 @@ def render_bounding_boxes(bb_box_list, png_path):
 
 # WORK_STATUS maps quad url to a 'idle', 'working', 'error', or list result
 # if complete
-QUAD_URL_TO_STATUS_MAP = dict()
-URL_TO_PROCESS_LIST = []
+QUAD_URI_TO_STATUS_MAP = dict()
+URI_TO_PROCESS_LIST = []
 QUAD_AVAILBLE_EVENT = threading.Event()
 
 
@@ -185,7 +185,7 @@ def quad_processor(quad_offset_queue, quad_file_path_queue):
 
 
 def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
-    """Calculate inference on data coming in on the URL_TO_PROCESS_LIST.
+    """Calculate inference on data coming in on the URI_TO_PROCESS_LIST.
 
     Other notable global variable is QUAD_AVAILBLE_EVENT that's an event for
     waiting for new work that gets set when new works is recieved.
@@ -205,17 +205,17 @@ def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
         subprocess_result = None
         while True:
             QUAD_AVAILBLE_EVENT.wait(5.0)
-            if not URL_TO_PROCESS_LIST:
+            if not URI_TO_PROCESS_LIST:
                 continue
             start_time = time.time()
-            quad_url = URL_TO_PROCESS_LIST.pop()
-            QUAD_URL_TO_STATUS_MAP[quad_url] = 'processing'
+            quad_uri = URI_TO_PROCESS_LIST.pop()
+            QUAD_URI_TO_STATUS_MAP[quad_uri] = 'processing'
             quad_raster_path = os.path.join(
-                WORKSPACE_DIR, os.path.basename(quad_url))
-            LOGGER.info('download ' + quad_url + ' to ' + quad_raster_path)
+                WORKSPACE_DIR, os.path.basename(quad_uri))
+            LOGGER.info('download ' + quad_uri + ' to ' + quad_raster_path)
             subprocess_result = subprocess.run(
                 '/usr/local/gcloud-sdk/google-cloud-sdk/bin/gsutil cp '
-                '"%s" %s' % (quad_url, quad_raster_path), check=True,
+                '"%s" %s' % (quad_uri, quad_raster_path), check=True,
                 shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             LOGGER.info('process cuts of quad ' + quad_raster_path)
 
@@ -304,17 +304,17 @@ def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
                     first_report = False
 
                 lat_lng_bb_list.append(coord_list)
-            QUAD_URL_TO_STATUS_MAP[quad_url] = lat_lng_bb_list
+            QUAD_URI_TO_STATUS_MAP[quad_uri] = lat_lng_bb_list
             LOGGER.info(
                 'done processing quad %s took %ss',
                 quad_raster_path, str(time.time()-start_time))
-            if len(URL_TO_PROCESS_LIST) == 0:
+            if len(URI_TO_PROCESS_LIST) == 0:
                 QUAD_AVAILBLE_EVENT.clear()
     except Exception:
         LOGGER.exception('error occured on inference worker')
         if subprocess_result:
             LOGGER.error(subprocess_result)
-        QUAD_URL_TO_STATUS_MAP[quad_url] = 'error'
+        QUAD_URI_TO_STATUS_MAP[quad_uri] = 'error'
         raise
 
 
@@ -322,14 +322,14 @@ def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
 def do_inference():
     """Run dam inference on the posted quad."""
     LOGGER.debug(flask.request.json)
-    quad_url = flask.request.json['quad_url']
+    quad_uri = flask.request.json['quad_uri']
 
-    if quad_url in QUAD_URL_TO_STATUS_MAP:
-        return quad_url + ' already scheduled', 500
-    QUAD_URL_TO_STATUS_MAP[quad_url] = 'scheduled'
-    URL_TO_PROCESS_LIST.append(quad_url)
+    if quad_uri in QUAD_URI_TO_STATUS_MAP:
+        return quad_uri + ' already scheduled', 500
+    QUAD_URI_TO_STATUS_MAP[quad_uri] = 'scheduled'
+    URI_TO_PROCESS_LIST.append(quad_uri)
     QUAD_AVAILBLE_EVENT.set()
-    return quad_url + ' is scheduled'
+    return quad_uri + ' is scheduled'
 
 
 @APP.route('/job_status', methods=['POST'])
@@ -339,10 +339,10 @@ def job_status():
     # 'processing'
     # 'error'
     # [a list of obunding boxes]
-    quad_url = flask.request.json['quad_url']
-    LOGGER.info('fetch status of ' + quad_url)
-    status = QUAD_URL_TO_STATUS_MAP[quad_url]
-    QUAD_URL_TO_STATUS_MAP[quad_url] = status
+    quad_uri = flask.request.json['quad_uri']
+    LOGGER.info('fetch status of ' + quad_uri)
+    status = QUAD_URI_TO_STATUS_MAP[quad_uri]
+    QUAD_URI_TO_STATUS_MAP[quad_uri] = status
     if not isinstance(status, list):
         return {'status': status}
     else:
@@ -354,23 +354,23 @@ def get_result():
     """Get the result for a given quad."""
     delivered = False
     try:
-        quad_url = flask.request.json['quad_url']
-        LOGGER.info('get result for ' + quad_url)
-        status = QUAD_URL_TO_STATUS_MAP[quad_url]
+        quad_uri = flask.request.json['quad_uri']
+        LOGGER.info('get result for ' + quad_uri)
+        status = QUAD_URI_TO_STATUS_MAP[quad_uri]
         if isinstance(status, list):
             delivered = True
             return {
-                'quad_url': quad_url,
+                'quad_uri': quad_uri,
                 'dam_bounding_box_list': status
                 }
         else:
-            return quad_url + ' not complete with status: ' + status, 500
+            return quad_uri + ' not complete with status: ' + status, 500
     except Exception as e:
-        LOGGER.exception('error on get result for ' + quad_url)
+        LOGGER.exception('error on get result for ' + quad_uri)
         return str(e), 500
     finally:
         if delivered:
-            del QUAD_URL_TO_STATUS_MAP[quad_url]
+            del QUAD_URI_TO_STATUS_MAP[quad_uri]
 
 
 if __name__ == '__main__':
