@@ -217,7 +217,7 @@ def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
                 WORKSPACE_DIR, os.path.basename(quad_url))
             LOGGER.info('download ' + quad_url + ' to ' + quad_raster_path)
             subprocess.run(
-                ['gsutil ls -l "%s"' % quad_url], check=True, shell=True)
+                'gsutil cp "%s" .' % quad_url, check=True, shell=True)
 
             LOGGER.info('process cuts of quad ' + quad_raster_path)
 
