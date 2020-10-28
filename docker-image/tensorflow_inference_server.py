@@ -177,7 +177,7 @@ def quad_processor(quad_offset_queue, quad_file_path_queue):
             if keras.backend.image_data_format() == 'channels_first':
                 image = image.transpose((2, 0, 1))
             image = numpy.expand_dims(image, axis=0)
-            quad_file_path_queue.put((scale, image))
+            quad_file_path_queue.put((xoff, yoff, scale, image))
             os.remove(quad_png_path)
     except Exception:
         LOGGER.exception('error occured on quad processor')
@@ -246,7 +246,7 @@ def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
             box_score_tuple_list = []
             while quad_slice_index > 0:
                 quad_slice_index -= 1
-                scale, image = quad_file_path_queue.get()
+                xoff, yoff, scale, image = quad_file_path_queue.get()
                 result = model.predict_on_batch(image)
                 # correct boxes for image scale
                 boxes, scores, labels = result
@@ -255,7 +255,8 @@ def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
                 # convert box to a list from a numpy array and score to a value
                 # from a single element array
                 box_score_tuple_list.extend([
-                    (list(box), score) for box, score in zip(
+                    ([box[0]+xoff, box[1]+yoff, box[2]+xoff, box[3]+yoff],
+                     score) for box, score in zip(
                         boxes[0], scores[0]) if score > 0.3])
                 LOGGER.info(
                     'len of box score tuple list: ' +
