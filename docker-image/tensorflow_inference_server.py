@@ -302,11 +302,11 @@ def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
                 coord_list = []
                 for index in [0, 2]:
                     point = ogr.Geometry(ogr.wkbPoint)
-                    point.Transform(local_to_wgs84)
                     point.AddPoint(
                         *gdal.ApplyGeoTransform(
                             quad_info['geotransform'],
                             bounding_box[index], bounding_box[index+1]))
+                    point.Transform(local_to_wgs84)
                     coord_list.extend([point.GetX(), point.GetY()])
                 if first_report:
                     LOGGER.info(
