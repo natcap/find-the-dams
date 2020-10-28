@@ -11,7 +11,7 @@ import argparse
 import logging
 import os
 import queue
-import shutil
+import multiprocessing
 import subprocess
 import sys
 import threading
@@ -21,14 +21,12 @@ from flask import Flask
 from osgeo import gdal
 from osgeo import osr
 import cv2
-import ecoshard
 import flask
 import numpy
 import PIL
 import PIL.ImageDraw
 import png
 import pygeoprocessing
-import requests
 import shapely.geometry
 
 from keras_retinanet import models
@@ -397,7 +395,7 @@ if __name__ == '__main__':
     quad_file_path_queue = queue.Queue()
 
     # make clipper workers
-    for _ in range(8):
+    for _ in range(multiprocessing.cpu_count()):
         quad_processor_worker_thread = threading.Thread(
             target=quad_processor,
             args=(quad_offset_queue, quad_file_path_queue))
