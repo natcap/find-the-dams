@@ -257,6 +257,9 @@ def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
                 box_score_tuple_list.extend([
                     (list(box), score) for box, score in zip(
                         boxes[0], scores[0]) if score > 0.3])
+                LOGGER.info(
+                    'len of box score tuple list: ' +
+                    str(len(box_score_tuple_list)))
 
             while box_score_tuple_list:
                 box, score = box_score_tuple_list.pop()
@@ -279,6 +282,9 @@ def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
             # make_quad_png(
             #     quad_raster_path, quad_png_path, 0, 0, None, None)
             # render_bounding_boxes(non_max_supression_box_list, quad_png_path)
+            LOGGER.info(
+                'length of non-max-suppression-box-list: ' +
+                len(non_max_supression_box_list))
             lat_lng_bb_list = []
             for bounding_box in non_max_supression_box_list:
                 LOGGER.info('base bounding_box: ' + str(bounding_box))
