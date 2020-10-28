@@ -216,6 +216,10 @@ def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
             quad_raster_path = os.path.join(
                 WORKSPACE_DIR, os.path.basename(quad_url))
             LOGGER.info('download ' + quad_url + ' to ' + quad_raster_path)
+            gsutil_ls_result = subprocess.run(
+               ['gsutil ls -l "%s"' % quad_url], stdout=subprocess.PIPE,
+               check=True, shell=True)
+            LOGGER.debug(gsutil_ls_result)
             subprocess_result = subprocess.run(
                 'gsutil cp "%s" .' % quad_url, check=True, shell=True,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
