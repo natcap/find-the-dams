@@ -335,7 +335,7 @@ def work_manager(quad_vector_path, update_interval=5.0):
                         LOGGER.info(f'{quad_uri} status: {status}')
                         if isinstance(status, list):
                             # quad_uri is complete this is the result!
-                            complete_payload_bb_list.append(quad_uri, status)
+                            complete_payload_bb_list.append((quad_uri, status))
                         else:
                             still_processing_payload_list.append(quad_uri)
                 except Exception:
@@ -349,7 +349,6 @@ def work_manager(quad_vector_path, update_interval=5.0):
                 if still_processing_payload_list:
                     worker_to_payload_list_map_swap[scheduled_worker] = \
                         still_processing_payload_list
-                worker_to_payload_list_map = worker_to_payload_list_map_swap
 
                 # record any complete work
                 if complete_payload_bb_list:
@@ -386,7 +385,9 @@ def work_manager(quad_vector_path, update_interval=5.0):
                     quad_layer.CommitTransaction()
                     quad_layer = None
                     quad_vector = None
-
+            # swap back any workers that are still processing
+            worker_to_payload_list_map = worker_to_payload_list_map_swap
+            LOGGER.debug(f'done with iteration value: {worker_to_payload_list_map}')
             if (len(unprocessed_uri_list) == 0 and
                     len(worker_to_payload_list_map) == 0):
                 LOGGER.info('all done with work')
