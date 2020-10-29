@@ -216,37 +216,43 @@ class Worker(object):
         """Worker is uniquely identified by id, but IP is useful too."""
         return f'Worker: {self.worker_ip}({self.id})'
 
-    def send_job(self, job_payload):
-        """Send a job to the worker."""
+    def send_job(self, quad_uri_list):
+        """Send a job to the worker.
+
+        Args:
+            quad_uri_list (list): a list of quad uris to process on this
+            worker.
+
+        Returns:
+            None
+        """
         worker_rest_url = (
             f'http://{self.worker_ip}:{self.port}/do_inference')
         response = requests.post(
-            worker_rest_url, json={'quad_uri': job_payload})
+            worker_rest_url, json={'quad_uri_list': quad_uri_list})
         if not response:
             raise RuntimeError(f'something went wrong {response.text}')
         self.active = True
 
-    def get_status(self, job_payload):
-        """Return 'idle', 'processing', 'complete', 'error'."""
+    def get_status(self, quad_uri_list):
+        """Return list of status or result.
+
+        Args:
+            quad_uri_list (list): list of quad uris to query.
+
+        Return:
+            a list of same length as ``quad_uri_list`` containing 'scheduled',
+            'processing', 'error', or list of bounding boxes which are the
+            result.
+        """
         if not self.active:
             raise RuntimeError(
                 f'Worker {self.worker_ip} tested but is not active.')
         worker_rest_url = (
             f'http://{self.worker_ip}:{self.port}/job_status')
         response = requests.post(
-            worker_rest_url, json={'quad_uri': job_payload})
-        return response.json()['status']
-
-    def get_result(self, job_payload):
-        """Return result if complete."""
-        worker_rest_url = (
-            f'http://{self.worker_ip}:{self.port}/get_result')
-        response = requests.post(
-            worker_rest_url, json={'quad_uri': job_payload})
-        if response:
-            LOGGER.debug(f'got {response.json()} for {job_payload}')
-            return response.json()
-        raise RuntimeError(f'bad response {response}')
+            worker_rest_url, json={'quad_uri_list': quad_uri_list})
+        return response.json()['status_list']
 
 
 def work_manager(quad_vector_path, update_interval=5.0):
@@ -265,7 +271,7 @@ def work_manager(quad_vector_path, update_interval=5.0):
     quad_uri_to_fid = {}
 
     # load quads to process to get fid & uri field
-    unprocessed_fid_uri_list = []
+    unprocessed_uri_list = []
     quad_vector = gdal.OpenEx(quad_vector_path, gdal.OF_VECTOR)
     quad_layer = quad_vector.GetLayer()
     quad_layer.SetAttributeFilter('processed=0')
@@ -274,13 +280,14 @@ def work_manager(quad_vector_path, update_interval=5.0):
         fid = quad_feature.GetFID()
         quad_url = quad_feature.GetField('quad_uri')
         quad_uri = quad_url.replace('https://storage.googleapis.com/', 'gs://')
-        unprocessed_fid_uri_list.append((fid, quad_uri))
+        unprocessed_uri_list.append(quad_uri)
         quad_uri_to_fid[quad_uri] = fid
-    LOGGER.info(f'{len(unprocessed_fid_uri_list)} quads to process')
+    LOGGER.info(f'{len(unprocessed_uri_list)} quads to process')
 
     try:
         while True:
             start_time = time.time()
+            # Build set of active workers
             local_global_workers = list(GLOBAL_WORKERS)
             while local_global_workers:
                 global_worker = local_global_workers.pop()
@@ -290,51 +297,74 @@ def work_manager(quad_vector_path, update_interval=5.0):
                     LOGGER.debug(f'adding {global_worker} to available_workers')
                     available_workers.add(global_worker)
 
-            # Schedule any available work to the workers
-            while available_workers and unprocessed_fid_uri_list:
+            # Schedule any available work to any available workers
+            while available_workers and unprocessed_uri_list:
                 free_worker = available_workers.pop()
                 jobs_to_add = (
                     JOBS_PER_WORKER -
                     len(worker_to_payload_list_map[free_worker]))
-                try:
-                    for _ in range(jobs_to_add):
-                        payload = unprocessed_fid_uri_list.pop()
-                        LOGGER.debug(f'processing payload {payload}')
-                        free_worker.send_job(payload[1])
-                        worker_to_payload_list_map[free_worker].append(payload)
-                except Exception:
-                    LOGGER.exception(
-                        f'unable to send job {payload[1]} to {free_worker}')
-                    unprocessed_fid_uri_list.append(payload)
+                if jobs_to_add:
+                    url_list = unprocessed_uri_list[-jobs_to_add:]
+                    try:
+                        free_worker.send_job(url_list)
+                        worker_to_payload_list_map[free_worker].extend(
+                            url_list)
+                        # remove the last `jobs_to_add` number of elements
+                        unprocessed_uri_list = (
+                            unprocessed_uri_list[:-jobs_to_add])
+                    except Exception:
+                        LOGGER.exception(
+                            f'unable to send job list {url_list} to '
+                            f'{free_worker}')
+                        unprocessed_uri_list.extend(url_list)
 
             # This loop checks if any of the workers are done, processes that
             # work and puts the free workers back on the free queue
-            worker_to_payload_map_swap = collections.defaultdict(list)
+            # if the worker has an error, invalidate all the work sent to it
+            # and set it up to reschedule
+            worker_to_payload_list_map_swap = collections.defaultdict(list)
+            complete_payload_bb_list = []
+            still_processing_payload_list = []
             while worker_to_payload_list_map:
-                scheduled_worker, payload_list = (
+                scheduled_worker, quad_uri_list = (
                     worker_to_payload_list_map.popitem())
-                LOGGER.debug(f'*** scheduled worker payload list: {scheduled_worker} {payload_list}')
-                while payload_list:
-                    job_payload = payload_list.pop(0)
-                    try:
-                        status = scheduled_worker.get_status(job_payload[1])
-                    except Exception:
-                        LOGGER.exception(f'{scheduled_worker} failed')
-                        status = 'error'
-                    if status == 'error':
-                        LOGGER.error(f'{scheduled_worker} failed on job {job_payload}')
-                        unprocessed_fid_uri_list.append(job_payload)
-                    elif status == 'complete':
-                        # If job is complete, process result and put the
-                        # free worker back in the free worker pool
-                        payload = scheduled_worker.get_result(job_payload[1])
-                        LOGGER.debug(f'{job_payload} COMPLETE result: {payload}')
+                # check the payload on that worker
+                try:
+                    status_list = scheduled_worker.get_status(quad_uri_list)
+                    for status, quad_uri in zip(status_list, quad_uri_list):
+                        LOGGER.info(f'{quad_uri} status: {status}')
+                        if isinstance(status, list):
+                            # quad_uri is complete this is the result!
+                            complete_payload_bb_list.append(quad_uri, status)
+                        else:
+                            still_processing_payload_list.append(quad_uri)
+                except Exception:
+                    # if exception, invalidate any of the work
+                    LOGGER.exception(f'{scheduled_worker} failed')
+                    unprocessed_uri_list.extend(quad_uri_list)
+                    still_processing_payload_list = []
+                    complete_payload_bb_list = []
 
+                # put any work back on the list that's still processing
+                if still_processing_payload_list:
+                    worker_to_payload_list_map_swap[scheduled_worker] = \
+                        still_processing_payload_list
+                worker_to_payload_list_map = worker_to_payload_list_map_swap
+
+                # record any complete work
+                if complete_payload_bb_list:
+                    quad_vector = gdal.OpenEx(
+                        quad_vector_path, gdal.OF_VECTOR | gdal.GA_Update)
+                    quad_layer = quad_vector.GetLayer()
+                    quad_layer.StartTransaction()
+
+                    for quad_uri, bounding_box_list in \
+                            complete_payload_bb_list:
                         LOGGER.info(
                             f"Update {DATABASE_PATH} With Completed Quad "
-                            f"{payload['quad_uri']} "
-                            f"{payload['dam_bounding_box_list']}")
-                        if payload['dam_bounding_box_list']:
+                            f"{quad_uri} "
+                            f"{bounding_box_list}")
+                        if bounding_box_list:
                             _execute_sqlite(
                                 '''
                                 INSERT INTO detected_dams
@@ -342,34 +372,22 @@ def work_manager(quad_vector_path, update_interval=5.0):
                                      probability, country_list, image_uri)
                                 VALUES(?, ?, ?, ?, -1, '', '');
                                 ''', DATABASE_PATH,
-                                argument_list=payload['dam_bounding_box_list'],
+                                argument_list=bounding_box_list,
                                 execute='many')
 
                         LOGGER.info(
-                            f"Update Planet Quad Vector {payload['quad_uri']}")
-                        quad_vector = gdal.OpenEx(
-                            quad_vector_path, gdal.OF_VECTOR | gdal.GA_Update)
-                        quad_layer = quad_vector.GetLayer()
-                        quad_layer.StartTransaction()
+                            f"Update Planet Quad Vector {quad_uri}")
                         quad_feature = quad_layer.GetFeature(
-                            quad_uri_to_fid[payload['quad_uri']])
+                            quad_uri_to_fid[quad_uri])
                         quad_feature.SetField('processed', 1)
                         quad_layer.SetFeature(quad_feature)
-                        quad_feature = None
-                        quad_layer.CommitTransaction()
-                        quad_layer = None
-                        quad_vector = None
-                    else:
-                        LOGGER.info(
-                            f'status for {scheduled_worker} is {status} '
-                            f'({job_payload})')
-                        worker_to_payload_map_swap[scheduled_worker].append(
-                            job_payload)
-            # swap back any remaining workers
-            LOGGER.debug(f'swapping back {worker_to_payload_map_swap}')
-            worker_to_payload_list_map = worker_to_payload_map_swap
 
-            if (len(unprocessed_fid_uri_list) == 0 and
+                    quad_feature = None
+                    quad_layer.CommitTransaction()
+                    quad_layer = None
+                    quad_vector = None
+
+            if (len(unprocessed_uri_list) == 0 and
                     len(worker_to_payload_list_map) == 0):
                 LOGGER.info('all done with work')
                 return

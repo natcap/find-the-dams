@@ -324,20 +324,22 @@ def health_check():
     else:
         return 'error', 500
 
+
 @APP.route('/do_inference', methods=['POST'])
 def do_inference():
     """Run dam inference on the posted quad."""
-    global HEALTHY
     try:
         LOGGER.debug(flask.request.json)
-        quad_uri = flask.request.json['quad_uri']
-        if quad_uri not in QUAD_URI_TO_STATUS_MAP:
-            QUAD_URI_TO_STATUS_MAP[quad_uri] = 'scheduled'
-            URI_TO_PROCESS_LIST.append(quad_uri)
-            QUAD_AVAILBLE_EVENT.set()
-        return quad_uri + ' is scheduled'
+        quad_uri_list = flask.request.json['quad_uri_list']
+        for quad_uri in quad_uri_list:
+            if quad_uri not in QUAD_URI_TO_STATUS_MAP:
+                QUAD_URI_TO_STATUS_MAP[quad_uri] = 'scheduled'
+                URI_TO_PROCESS_LIST.append(quad_uri)
+                QUAD_AVAILBLE_EVENT.set()
+        return quad_uri_list + ' is scheduled'
     except Exception:
         LOGGER.exception('something went wrong')
+        global HEALTHY
         HEALTHY = False
         raise
 
@@ -345,44 +347,28 @@ def do_inference():
 @APP.route('/job_status', methods=['POST'])
 def job_status():
     """Report status of given job."""
-    # 'idle'
+    # 'scheduled'
     # 'processing'
     # 'error'
     # [a list of obunding boxes]
-    quad_uri = flask.request.json['quad_uri']
-    LOGGER.info('fetch status of ' + quad_uri)
-    status = QUAD_URI_TO_STATUS_MAP[quad_uri]
-    QUAD_URI_TO_STATUS_MAP[quad_uri] = status
-    if not isinstance(status, list):
-        return {'status': status}
-    else:
-        return {'status': 'complete'}
-
-
-@APP.route('/get_result', methods=['POST'])
-def get_result():
-    """Get the result for a given quad."""
-    delivered = False
-    global HEALTHY
     try:
-        quad_uri = flask.request.json['quad_uri']
-        LOGGER.info('get result for ' + quad_uri)
-        status = QUAD_URI_TO_STATUS_MAP[quad_uri]
-        if isinstance(status, list):
-            delivered = True
-            return {
-                'quad_uri': quad_uri,
-                'dam_bounding_box_list': status
-                }
-        else:
-            return quad_uri + ' not complete with status: ' + status, 500
-    except Exception as e:
-        LOGGER.exception('error on get result for ' + quad_uri)
+        quad_uri_list = flask.request.json['quad_uri_list']
+        status_list = []
+        for quad_uri in quad_uri_list:
+            LOGGER.info('fetch status of ' + quad_uri)
+            status = QUAD_URI_TO_STATUS_MAP[quad_uri]
+            if status == 'error':
+                raise Exception('error on %s', quad_uri)
+            status_list.append(status)
+            if isinstance(status, list):
+                # success, delete from record
+                del QUAD_URI_TO_STATUS_MAP[quad_uri]
+        return {'status_list': status_list}
+    except Exception:
+        LOGGER.exception('something went wrong')
+        global HEALTHY
         HEALTHY = False
-        return str(e), 500
-    finally:
-        if delivered:
-            del QUAD_URI_TO_STATUS_MAP[quad_uri]
+        raise
 
 
 if __name__ == '__main__':
