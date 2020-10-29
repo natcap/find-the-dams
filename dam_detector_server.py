@@ -435,6 +435,7 @@ def client_monitor(client_key, update_interval=5.0, local_hosts=None):
                 'gcloud compute instances list '
                 f'--filter="metadata.items.key={client_key} AND status=RUNNING" '
                 '--format=json', capture_output=True, shell=True).stdout
+            LOGGER.debug(f'result of instance list: {result}')
             live_workers = set()
             if local_hosts is not None:
                 live_workers.update([Worker(host) for host in local_hosts])
