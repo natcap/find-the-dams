@@ -36,6 +36,7 @@ from keras_retinanet.utils.keras_version import check_keras_version
 from keras_retinanet.utils.tf_version import check_tf_version
 import keras
 
+JOBS_PER_WORKER = 3
 WORKSPACE_DIR = '/usr/local/data_dir'
 ANNOTATED_IMAGE_DIR = os.path.join(WORKSPACE_DIR, 'annotated_images')
 for dirname in [WORKSPACE_DIR, ANNOTATED_IMAGE_DIR]:
@@ -187,7 +188,8 @@ def quad_processor(quad_offset_queue, quad_file_path_queue):
         raise
 
 
-def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
+def do_inference_worker(
+        model, quad_offset_queue, quad_file_path_queue, inference_lock):
     """Calculate inference on data coming in on the URI_TO_PROCESS_LIST.
 
     Other notable global variable is QUAD_AVAILBLE_EVENT that's an event for
@@ -198,6 +200,8 @@ def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
         quad_offset_queue (queue): send to queue for quad processing
         quad_file_path_queue (queue): used for recieving quads that need to be
             inferenced.
+        inference_lock (threading.Lock): used to ensure one shot of inference
+            goes at a time.
 
     Returns:
         never
@@ -246,20 +250,21 @@ def do_inference_worker(model, quad_offset_queue, quad_file_path_queue):
 
             LOGGER.info('schedule inference of %s', quad_id)
             box_score_tuple_list = []
-            while quad_slice_index > 0:
-                quad_slice_index -= 1
-                xoff, yoff, scale, image = quad_file_path_queue.get()
-                result = model.predict_on_batch(image)
-                # correct boxes for image scale
-                boxes, scores, labels = result
-                boxes /= scale
+            with inference_lock:
+                while quad_slice_index > 0:
+                    quad_slice_index -= 1
+                    xoff, yoff, scale, image = quad_file_path_queue.get()
+                    result = model.predict_on_batch(image)
+                    # correct boxes for image scale
+                    boxes, scores, labels = result
+                    boxes /= scale
 
-                # convert box to a list from a numpy array and score to a value
-                # from a single element array
-                box_score_tuple_list.extend([
-                    ([box[0]+xoff, box[1]+yoff, box[2]+xoff, box[3]+yoff],
-                     score) for box, score in zip(
-                        boxes[0], scores[0]) if score > 0.3])
+                    # convert box to a list from a numpy array and score to a
+                    # value from a single element array
+                    box_score_tuple_list.extend([
+                        ([box[0]+xoff, box[1]+yoff, box[2]+xoff, box[3]+yoff],
+                         score) for box, score in zip(
+                            boxes[0], scores[0]) if score > 0.3])
 
             while box_score_tuple_list:
                 box, score = box_score_tuple_list.pop()
@@ -408,9 +413,12 @@ if __name__ == '__main__':
         quad_processor_worker_thread.daemon = True
         quad_processor_worker_thread.start()
 
-    do_inference_worker_thread = threading.Thread(
-        target=do_inference_worker,
-        args=(model, quad_offset_queue, quad_file_path_queue))
-    do_inference_worker_thread.daemon = True
-    do_inference_worker_thread.start()
+    inference_lock = threading.Lock()
+    for _ in range(JOBS_PER_WORKER):
+        do_inference_worker_thread = threading.Thread(
+            target=do_inference_worker,
+            args=(model, quad_offset_queue, quad_file_path_queue,
+                  inference_lock))
+        do_inference_worker_thread.daemon = True
+        do_inference_worker_thread.start()
     APP.run(host='0.0.0.0', port=args.app_port)
