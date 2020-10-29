@@ -138,6 +138,8 @@ def make_quad_png(
         png.from_array(image_2d, 'RGBA').save(quad_png_path)
         return quad_png_path
     except Exception:
+        global HEALTHY
+        HEALTHY = False
         LOGGER.exception(
             'error on %s generate png with array:\n%s\ndims:%s\n'
             'file exists:%s\nxoff=%d, yoff=%d, win_xsize=%d, win_ysize=%d' % (
@@ -384,7 +386,8 @@ def get_result():
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Carbon edge model')
+    """Entry point."""
+    parser = argparse.ArgumentParser(description='Tensorflow inference server')
     parser.add_argument('tensorflow_model_path', help='path to frozen model')
     parser.add_argument(
         '--app_port', default=80, help='server port')
