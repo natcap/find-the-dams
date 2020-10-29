@@ -254,6 +254,19 @@ class Worker(object):
             worker_rest_url, json={'quad_uri_list': quad_uri_list})
         return response.json()['status_list']
 
+    def health_check(self):
+        """Test health status."""
+        try:
+            heath_rest_url = (
+                f'http://{self.worker_ip}:{self.port}/health_check')
+            response = requests.get(heath_rest_url)
+            if response.ok:
+                LOGGER.info(f'health check for {self.worker_ip} is okay {response.text}')
+            else:
+                LOGGER.error(f'***health check for {self.worker_ip} is BAD {response.text}')
+        except Exception:
+            LOGGER.exception(f'error on {self.worker_ip} when health_check')
+
 
 def work_manager(quad_vector_path, update_interval=5.0):
     """Manager to record and schedule work.
@@ -300,6 +313,7 @@ def work_manager(quad_vector_path, update_interval=5.0):
             # Schedule any available work to any available workers
             while available_workers and unprocessed_uri_list:
                 free_worker = available_workers.pop()
+                free_worker.health_check()
                 jobs_to_add = (
                     JOBS_PER_WORKER -
                     len(worker_to_payload_list_map[free_worker]))
@@ -328,6 +342,8 @@ def work_manager(quad_vector_path, update_interval=5.0):
             while worker_to_payload_list_map:
                 scheduled_worker, quad_uri_list = (
                     worker_to_payload_list_map.popitem())
+                LOGGER.debug(
+                    f'about to check {scheduled_worker} with {quad_uri_list}')
                 # check the payload on that worker
                 try:
                     status_list = scheduled_worker.get_status(quad_uri_list)

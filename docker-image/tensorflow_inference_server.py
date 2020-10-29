@@ -358,13 +358,16 @@ def job_status():
         status_list = []
         for quad_uri in quad_uri_list:
             LOGGER.info('fetch status of ' + quad_uri)
-            status = QUAD_URI_TO_STATUS_MAP[quad_uri]
-            if status == 'error':
-                raise Exception('error on %s', quad_uri)
-            status_list.append(status)
-            if isinstance(status, list):
-                # success, delete from record
-                del QUAD_URI_TO_STATUS_MAP[quad_uri]
+            try:
+                status = QUAD_URI_TO_STATUS_MAP[quad_uri]
+                if status == 'error':
+                    raise Exception('error on %s', quad_uri)
+                status_list.append(status)
+                if isinstance(status, list):
+                    # success, delete from record
+                    del QUAD_URI_TO_STATUS_MAP[quad_uri]
+            except KeyError:
+                status_list.append('not found')
         return {'status_list': status_list}
     except Exception:
         LOGGER.exception('something went wrong')
