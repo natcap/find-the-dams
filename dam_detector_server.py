@@ -31,7 +31,8 @@ QUADS_TO_PROCESS_PATH = 'quads_to_process.gpkg'
 LOGGER = logging.getLogger(__name__)
 
 WORKSPACE_DIR = 'workspace'
-DATABASE_PATH = os.path.join(WORKSPACE_DIR, 'test_natgeo_dams_database_2020_07_01.db')
+DATABASE_PATH = os.path.join(
+    WORKSPACE_DIR, 'test_natgeo_dams_database_2020_07_01.db')
 
 DAM_INFERENCE_WORKER_KEY = 'dam_inference_worker'
 JOBS_PER_WORKER = 3
@@ -438,8 +439,12 @@ def client_monitor(client_key, update_interval=5.0, local_hosts=None):
             if local_hosts is not None:
                 live_workers.update([Worker(host) for host in local_hosts])
             for instance in json.loads(result):
-                network_ip = instance['networkInterfaces'][0][
-                    'accessConfigs'][0]['natIP']
+                try:
+                    network_ip = instance['networkInterfaces'][0][
+                        'accessConfigs'][0]['natIP']
+                except Exception:
+                    LOGGER.info("couldn't find external address, try internal")
+                    network_ip = instance['networkInterfaces'][0]['networkIP']
                 LOGGER.debug(f"{instance['name']} {network_ip}")
                 live_workers.add(Worker(network_ip))
 
