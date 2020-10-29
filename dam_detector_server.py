@@ -215,7 +215,7 @@ class Worker(object):
 
     def __repr__(self):
         """Worker is uniquely identified by id, but IP is useful too."""
-        return f'Worker: {self.worker_ip}({self.id})'
+        return 'Worker: %s(%s)' % (self.worker_ip, self.id)
 
     def send_job(self, quad_uri_list):
         """Send a job to the worker.
@@ -228,11 +228,11 @@ class Worker(object):
             None
         """
         worker_rest_url = (
-            f'http://{self.worker_ip}:{self.port}/do_inference')
+            'http://%s:%s/do_inference' % (self.worker_ip, self.port))
         response = requests.post(
             worker_rest_url, json={'quad_uri_list': quad_uri_list})
         if not response:
-            raise RuntimeError(f'something went wrong {response.text}')
+            raise RuntimeError('something went wrong ' +response.text)
         self.active = True
 
     def get_status(self, quad_uri_list):
@@ -248,9 +248,9 @@ class Worker(object):
         """
         if not self.active:
             raise RuntimeError(
-                f'Worker {self.worker_ip} tested but is not active.')
+                'Worker %s tested but is not active.' % self.worker_ip)
         worker_rest_url = (
-            f'http://{self.worker_ip}:{self.port}/job_status')
+            'http://%s:%s/job_status' % (self.worker_ip, self.port))
         response = requests.post(
             worker_rest_url, json={'quad_uri_list': quad_uri_list})
         return response.json()['status_list']
@@ -259,14 +259,18 @@ class Worker(object):
         """Test health status."""
         try:
             heath_rest_url = (
-                f'http://{self.worker_ip}:{self.port}/health_check')
+                'http://%s:%s/health_check' % (self.worker_ip, self.port))
             response = requests.get(heath_rest_url)
             if response.ok:
-                LOGGER.info(f'health check for {self.worker_ip} is okay {response.text}')
+                LOGGER.info(
+                    'health check for %s is okay %s' % (
+                        self.worker_ip, response.text))
             else:
-                LOGGER.error(f'***health check for {self.worker_ip} is BAD {response.text}')
+                LOGGER.error(
+                    '***health check for %s is BAD %s' % (
+                        self.worker_ip, response.text))
         except Exception:
-            LOGGER.exception(f'error on {self.worker_ip} when health_check')
+            LOGGER.exception('error on %s when health_check' % self.worker_ip)
 
 
 def work_manager(quad_vector_path, update_interval=5.0):
@@ -296,7 +300,7 @@ def work_manager(quad_vector_path, update_interval=5.0):
         quad_uri = quad_url.replace('https://storage.googleapis.com/', 'gs://')
         unprocessed_uri_list.append(quad_uri)
         quad_uri_to_fid[quad_uri] = fid
-    LOGGER.info(f'{len(unprocessed_uri_list)} quads to process')
+    LOGGER.info('%d quads to process' % len(unprocessed_uri_list))
 
     try:
         while True:
@@ -308,7 +312,8 @@ def work_manager(quad_vector_path, update_interval=5.0):
                 if (global_worker not in available_workers and
                         len(worker_to_payload_list_map[global_worker]) <
                         JOBS_PER_WORKER):
-                    LOGGER.debug(f'adding {global_worker} to available_workers')
+                    LOGGER.debug(
+                        'adding %s to available_workers' % global_worker)
                     available_workers.add(global_worker)
 
             # Schedule any available work to any available workers
@@ -329,8 +334,8 @@ def work_manager(quad_vector_path, update_interval=5.0):
                             unprocessed_uri_list[:-jobs_to_add])
                     except Exception:
                         LOGGER.exception(
-                            f'unable to send job list {url_list} to '
-                            f'{free_worker}')
+                            'unable to send job list %s to ' % (url_list)
+                            + str(free_worker))
                         unprocessed_uri_list.extend(url_list)
 
             # This loop checks if any of the workers are done, processes that
@@ -344,12 +349,13 @@ def work_manager(quad_vector_path, update_interval=5.0):
                 scheduled_worker, quad_uri_list = (
                     worker_to_payload_list_map.popitem())
                 LOGGER.debug(
-                    f'about to check {scheduled_worker} with {quad_uri_list}')
+                    'about to check %s with %s' % (
+                        scheduled_worker, quad_uri_list))
                 # check the payload on that worker
                 try:
                     status_list = scheduled_worker.get_status(quad_uri_list)
                     for status, quad_uri in zip(status_list, quad_uri_list):
-                        LOGGER.info(f'{quad_uri} status: {status}')
+                        LOGGER.info('%s status: %s' % (quad_uri, status))
                         if isinstance(status, list):
                             # quad_uri is complete this is the result!
                             complete_payload_bb_list.append((quad_uri, status))
@@ -357,7 +363,7 @@ def work_manager(quad_vector_path, update_interval=5.0):
                             still_processing_payload_list.append(quad_uri)
                 except Exception:
                     # if exception, invalidate any of the work
-                    LOGGER.exception(f'{scheduled_worker} failed')
+                    LOGGER.exception('%s failed' % scheduled_worker)
                     unprocessed_uri_list.extend(quad_uri_list)
                     still_processing_payload_list = []
                     complete_payload_bb_list = []
@@ -405,7 +411,8 @@ def work_manager(quad_vector_path, update_interval=5.0):
             # swap back any workers that are still processing
             worker_to_payload_list_map = worker_to_payload_list_map_swap
             LOGGER.debug(
-                f'done with iteration value: {worker_to_payload_list_map}')
+                'done with iteration value: %s' % str(
+                    worker_to_payload_list_map))
             if (len(unprocessed_uri_list) == 0 and
                     len(worker_to_payload_list_map) == 0):
                 LOGGER.info('all done with work')
@@ -433,9 +440,9 @@ def client_monitor(client_key, update_interval=5.0, local_hosts=None):
             LOGGER.debug('checking for compute instances')
             result = subprocess.run(
                 'gcloud compute instances list '
-                f'--filter="metadata.items.key={client_key} AND status=RUNNING" '
+                '--filter="metadata.items.key=%s AND status=RUNNING" ' % client_key +
                 '--format=json', capture_output=True, shell=True).stdout
-            LOGGER.debug(f'result of instance list: {result}')
+            LOGGER.debug('result of instance list: %s' % result)
             live_workers = set()
             if local_hosts is not None:
                 live_workers.update([Worker(host) for host in local_hosts])
@@ -457,9 +464,9 @@ def client_monitor(client_key, update_interval=5.0, local_hosts=None):
             # Remove any clients that are missing
             GLOBAL_WORKERS.intersection_update(live_workers)
             # Add in any clients that are new
-            LOGGER.debug(f'new workers: {new_workers}')
+            LOGGER.debug('new workers: %s' % str(new_workers))
             GLOBAL_WORKERS.update(new_workers)
-            LOGGER.debug(f'GLOBAL_WORKERS: {GLOBAL_WORKERS}')
+            LOGGER.debug('GLOBAL_WORKERS: %s' % str(GLOBAL_WORKERS))
             time.sleep(max(update_interval - (time.time() - start_time), 0))
     except Exception:
         LOGGER.exception('client monitor failed')
