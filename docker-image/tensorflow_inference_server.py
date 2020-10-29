@@ -268,6 +268,8 @@ def do_inference_worker(
                          score) for box, score in zip(
                             boxes[0], scores[0]) if score > 0.3])
 
+            # quad is now processed, it can be removed
+            os.remove(quad_raster_path)
             while box_score_tuple_list:
                 box, score = box_score_tuple_list.pop()
                 shapely_box = shapely.geometry.box(*box)
@@ -336,7 +338,7 @@ def do_inference():
                 QUAD_URI_TO_STATUS_MAP[quad_uri] = 'scheduled'
                 URI_TO_PROCESS_LIST.append(quad_uri)
                 QUAD_AVAILBLE_EVENT.set()
-        return quad_uri_list + ' is scheduled'
+        return str(quad_uri_list) + ' is scheduled'
     except Exception:
         LOGGER.exception('something went wrong')
         global HEALTHY
