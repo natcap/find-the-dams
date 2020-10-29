@@ -337,9 +337,9 @@ def work_manager(quad_vector_path, update_interval=5.0):
             # if the worker has an error, invalidate all the work sent to it
             # and set it up to reschedule
             worker_to_payload_list_map_swap = collections.defaultdict(list)
-            complete_payload_bb_list = []
-            still_processing_payload_list = []
             while worker_to_payload_list_map:
+                complete_payload_bb_list = []
+                still_processing_payload_list = []
                 scheduled_worker, quad_uri_list = (
                     worker_to_payload_list_map.popitem())
                 LOGGER.debug(
@@ -403,7 +403,8 @@ def work_manager(quad_vector_path, update_interval=5.0):
                     quad_vector = None
             # swap back any workers that are still processing
             worker_to_payload_list_map = worker_to_payload_list_map_swap
-            LOGGER.debug(f'done with iteration value: {worker_to_payload_list_map}')
+            LOGGER.debug(
+                f'done with iteration value: {worker_to_payload_list_map}')
             if (len(unprocessed_uri_list) == 0 and
                     len(worker_to_payload_list_map) == 0):
                 LOGGER.info('all done with work')
