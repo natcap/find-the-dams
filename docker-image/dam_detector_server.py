@@ -185,7 +185,7 @@ class RateEstimator(object):
         if len(self._complete_time_list) < 2:
             return -99999
         time_span = (
-            self._complete_time_list[-1] - self._complete_time_list[0])
+            time.time() - self._complete_time_list[0])
         seconds_per_entry = time_span / len(self._complete_time_list)
         return seconds_per_entry
 
