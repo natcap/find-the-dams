@@ -37,6 +37,10 @@ DATABASE_PATH = os.path.join(
 DAM_INFERENCE_WORKER_KEY = 'dam_inference_worker'
 JOBS_PER_WORKER = 3
 
+UNPROCESSED_URI_LIST = None
+START_COUNT = None
+START_TIME = None
+
 APP = Flask(__name__, static_url_path='', static_folder='')
 
 
@@ -48,17 +52,18 @@ def favicon():
         mimetype='image/vnd.microsoft.icon')
 
 
-@APP.route('/get_status/', methods=['POST'])
-@retrying.retry(
-    wait_exponential_multiplier=1000, wait_exponential_max=10000,
-    stop_max_attempt_number=5)
+@APP.route('/get_status', methods=['GET'])
 def processing_status():
     """Return results about polygons that are processing."""
-    try:
-        return 'unimplemented'
-    except Exception:
-        LOGGER.exception('encountered exception')
-        return traceback.format_exc()
+    if UNPROCESSED_URI_LIST is None:
+        return 'booting up'
+    left_to_process = len(UNPROCESSED_URI_LIST)
+    current_time = time.time()
+    return (
+        '%d of %d quads left to process\n' % left_to_process +
+        '%.2f%% complete\n' % (left_to_process/START_COUNT*100.) +
+        '%.4f hours processing' % ((current_time-START_TIME) / 3600)
+        )
 
 
 @retrying.retry(wait_exponential_multiplier=100, wait_exponential_max=1000)
@@ -289,7 +294,8 @@ def work_manager(quad_vector_path, update_interval=5.0):
     quad_uri_to_fid = {}
 
     # load quads to process to get fid & uri field
-    unprocessed_uri_list = []
+    global UNPROCESSED_URI_LIST
+    UNPROCESSED_URI_LIST = []
     quad_vector = gdal.OpenEx(quad_vector_path, gdal.OF_VECTOR)
     quad_layer = quad_vector.GetLayer()
     quad_layer.SetAttributeFilter('processed=0')
@@ -298,9 +304,13 @@ def work_manager(quad_vector_path, update_interval=5.0):
         fid = quad_feature.GetFID()
         quad_url = quad_feature.GetField('quad_uri')
         quad_uri = quad_url.replace('https://storage.googleapis.com/', 'gs://')
-        unprocessed_uri_list.append(quad_uri)
+        UNPROCESSED_URI_LIST.append(quad_uri)
         quad_uri_to_fid[quad_uri] = fid
-    LOGGER.info('%d quads to process' % len(unprocessed_uri_list))
+    global START_COUNT
+    START_COUNT = len(UNPROCESSED_URI_LIST)
+    global START_TIME
+    START_TIME = time.time()
+    LOGGER.info('%d quads to process' % START_COUNT)
 
     try:
         while True:
@@ -317,26 +327,26 @@ def work_manager(quad_vector_path, update_interval=5.0):
                     available_workers.add(global_worker)
 
             # Schedule any available work to any available workers
-            while available_workers and unprocessed_uri_list:
+            while available_workers and UNPROCESSED_URI_LIST:
                 free_worker = available_workers.pop()
                 free_worker.health_check()
                 jobs_to_add = (
                     JOBS_PER_WORKER -
                     len(worker_to_payload_list_map[free_worker]))
                 if jobs_to_add:
-                    url_list = unprocessed_uri_list[-jobs_to_add:]
+                    url_list = UNPROCESSED_URI_LIST[-jobs_to_add:]
                     try:
                         free_worker.send_job(url_list)
                         worker_to_payload_list_map[free_worker].extend(
                             url_list)
                         # remove the last `jobs_to_add` number of elements
-                        unprocessed_uri_list = (
-                            unprocessed_uri_list[:-jobs_to_add])
+                        UNPROCESSED_URI_LIST = (
+                            UNPROCESSED_URI_LIST[:-jobs_to_add])
                     except Exception:
                         LOGGER.exception(
                             'unable to send job list %s to ' % (url_list)
                             + str(free_worker))
-                        unprocessed_uri_list.extend(url_list)
+                        UNPROCESSED_URI_LIST.extend(url_list)
 
             # This loop checks if any of the workers are done, processes that
             # work and puts the free workers back on the free queue
@@ -364,7 +374,7 @@ def work_manager(quad_vector_path, update_interval=5.0):
                 except Exception:
                     # if exception, invalidate any of the work
                     LOGGER.exception('%s failed' % scheduled_worker)
-                    unprocessed_uri_list.extend(quad_uri_list)
+                    UNPROCESSED_URI_LIST.extend(quad_uri_list)
                     still_processing_payload_list = []
                     complete_payload_bb_list = []
 
@@ -413,7 +423,7 @@ def work_manager(quad_vector_path, update_interval=5.0):
             LOGGER.debug(
                 'done with iteration value: %s' % str(
                     worker_to_payload_list_map))
-            if (len(unprocessed_uri_list) == 0 and
+            if (len(UNPROCESSED_URI_LIST) == 0 and
                     len(worker_to_payload_list_map) == 0):
                 LOGGER.info('all done with work')
                 return
