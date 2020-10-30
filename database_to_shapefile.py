@@ -114,7 +114,7 @@ def main():
             bounding_box_list):
         if lng_min < -180:
             continue
-        LOGGER.debug(f'{lng_min}, {lat_min}, {lng_max}, {lat_max}')
+        #LOGGER.debug(f'{lng_min}, {lat_min}, {lng_max}, {lat_max}')
         box = shapely.geometry.box(lng_min, lat_min, lng_max, lat_max)
         feature = ogr.Feature(layer.GetLayerDefn())
         feature.SetGeometry(ogr.CreateGeometryFromWkb(box.wkb))
