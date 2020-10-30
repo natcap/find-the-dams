@@ -60,7 +60,7 @@ def processing_status():
     left_to_process = len(UNPROCESSED_URI_LIST)
     current_time = time.time()
     return (
-        '%d of %d quads left to process\n' % left_to_process +
+        '%d of %d quads left to process\n' % (left_to_process, START_COUNT) +
         '%.2f%% complete\n' % (left_to_process/START_COUNT*100.) +
         '%.4f hours processing' % ((current_time-START_TIME) / 3600)
         )
