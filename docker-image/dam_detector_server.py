@@ -16,6 +16,7 @@ import traceback
 from flask import Flask
 from osgeo import gdal
 import flask
+import numpy
 import retrying
 import requests
 
@@ -60,11 +61,15 @@ def processing_status():
     left_to_process = len(UNPROCESSED_URI_LIST)
     current_time = time.time()
     global START_COUNT
+    processing_rate = RATE_ESTIMATOR.get_rate()
+    hours_left = left_to_process * processing_rate / 3600
     return (
         ('%d of %d quads left to process<br>' % (
             left_to_process, START_COUNT)) +
         ('%.2f%% complete<br>' % ((1-left_to_process/START_COUNT)*100.)) +
         ('%.4f hours processing<br>' % ((current_time-START_TIME) / 3600)) +
+        ('processing %.2fs/dam<br>' % (processing_rate)) +
+        ('estimate %.4f hours left<br>' % hours_left) +
         ('%d workers up') % len(GLOBAL_WORKERS))
 
 
@@ -161,6 +166,28 @@ def main():
     work_manager_thread.start()
 #    work_manager_thread.join()
     APP.run(host='0.0.0.0', port=80)
+
+
+class RateEstimator(object):
+    def __init__(self, n_to_track):
+        """Keep track of last `n_to_track` times."""
+        self.n_to_track = n_to_track
+        self._complete_time_list = []
+
+    def complete(self):
+        """Note another complete task."""
+        self._complete_time_list.append(time.time())
+        while len(self._complete_time_list) > self.n_to_track:
+            self._complete_time_list.pop(0)
+
+    def get_rate(self):
+        """Return sec/completions."""
+        if len(self._complete_time_list) < 2:
+            return -99999
+        time_span = (
+            self._complete_time_list[-1] - self._complete_time_list[0])
+        seconds_per_entry = time_span / len(self._complete_time_list)
+        return seconds_per_entry
 
 
 class Worker(object):
@@ -396,6 +423,7 @@ def work_manager(quad_vector_path, update_interval=5.0):
                             f"Update {DATABASE_PATH} With Completed Quad "
                             f"{quad_uri} "
                             f"{bounding_box_list}")
+                        RATE_ESTIMATOR.complete()
                         if bounding_box_list:
                             _execute_sqlite(
                                 '''
@@ -486,4 +514,5 @@ if __name__ == '__main__':
         description='Start dam detection server.')
     args = parser.parse_args()
     GLOBAL_WORKERS = set()
+    RATE_ESTIMATOR = RateEstimator(30)
     main()
