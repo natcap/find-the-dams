@@ -64,7 +64,7 @@ def processing_status():
         ('%d of %d quads left to process<br>' % (
             left_to_process, START_COUNT)) +
         ('%.2f%% complete<br>' % ((1-left_to_process/START_COUNT)*100.)) +
-        ('%.4f hours processing' % ((current_time-START_TIME) / 3600)) +
+        ('%.4f hours processing<br>' % ((current_time-START_TIME) / 3600)) +
         ('%d workers up') % len(GLOBAL_WORKERS))
 
 
