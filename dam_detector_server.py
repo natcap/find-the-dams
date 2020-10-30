@@ -440,8 +440,9 @@ def client_monitor(client_key, update_interval=5.0, local_hosts=None):
             LOGGER.debug('checking for compute instances')
             result = subprocess.run(
                 'gcloud compute instances list '
-                '--filter="metadata.items.key=%s AND status=RUNNING" ' % client_key +
-                '--format=json', shell=True).stdout
+                '--filter="metadata.items.key=%s ' % client_key +
+                'AND status=RUNNING" --format=json',
+                shell=True, stdout=subprocess.PIPE).stdout
             LOGGER.debug('result of instance list: %s' % result)
             live_workers = set()
             if local_hosts is not None:
