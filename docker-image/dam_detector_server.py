@@ -439,10 +439,6 @@ def client_monitor(client_key, update_interval=5.0, local_hosts=None):
             start_time = time.time()
             LOGGER.debug('checking for compute instances')
             result = subprocess.run(
-                '/usr/local/gcloud-sdk/google-cloud-sdk/bin/gcloud compute instances list --format=json',
-                shell=True, stdout=subprocess.PIPE).stdout
-            LOGGER.debug('raw output: ' + str(result))
-            result = subprocess.run(
                 '/usr/local/gcloud-sdk/google-cloud-sdk/bin/gcloud compute instances list '
                 '--filter="metadata.items.key=%s ' % client_key +
                 'AND status=RUNNING" --format=json',
