@@ -59,11 +59,13 @@ def processing_status():
         return 'booting up'
     left_to_process = len(UNPROCESSED_URI_LIST)
     current_time = time.time()
+    global START_COUNT
     return (
         ('%d of %d quads left to process<br>' % (
             left_to_process, START_COUNT)) +
-        ('%.2f%% complete<br>' % (left_to_process/START_COUNT*100.)) +
-        ('%.4f hours processing' % ((current_time-START_TIME) / 3600)))
+        ('%.2f%% complete<br>' % ((1-left_to_process/START_COUNT)*100.)) +
+        ('%.4f hours processing' % ((current_time-START_TIME) / 3600)) +
+        ('%d workers up') % len(GLOBAL_WORKERS))
 
 
 @retrying.retry(wait_exponential_multiplier=100, wait_exponential_max=1000)
