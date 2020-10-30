@@ -329,7 +329,6 @@ def work_manager(quad_vector_path, update_interval=5.0):
             # Schedule any available work to any available workers
             while available_workers and UNPROCESSED_URI_LIST:
                 free_worker = available_workers.pop()
-                free_worker.health_check()
                 jobs_to_add = (
                     JOBS_PER_WORKER -
                     len(worker_to_payload_list_map[free_worker]))
@@ -346,7 +345,6 @@ def work_manager(quad_vector_path, update_interval=5.0):
                         LOGGER.exception(
                             'unable to send job list %s to ' % (url_list)
                             + str(free_worker))
-                        UNPROCESSED_URI_LIST.extend(url_list)
 
             # This loop checks if any of the workers are done, processes that
             # work and puts the free workers back on the free queue
@@ -365,11 +363,13 @@ def work_manager(quad_vector_path, update_interval=5.0):
                 try:
                     status_list = scheduled_worker.get_status(quad_uri_list)
                     for status, quad_uri in zip(status_list, quad_uri_list):
-                        LOGGER.info('%s status: %s' % (quad_uri, status))
                         if isinstance(status, list):
                             # quad_uri is complete this is the result!
+                            LOGGER.info('%s complete with %d detections' % (
+                                quad_uri, len(status)))
                             complete_payload_bb_list.append((quad_uri, status))
                         else:
+                            LOGGER.info('%s status: %s' % (quad_uri, status))
                             still_processing_payload_list.append(quad_uri)
                 except Exception:
                     # if exception, invalidate any of the work
