@@ -157,9 +157,7 @@ def main():
         args=(QUADS_TO_PROCESS_PATH,))
     work_manager_thread.daemon = True
     work_manager_thread.start()
-    work_manager_thread.join()
-
-    return
+#    work_manager_thread.join()
     APP.run(host='0.0.0.0', port=80)
 
 
