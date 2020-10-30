@@ -440,7 +440,7 @@ def client_monitor(client_key, update_interval=5.0, local_hosts=None):
             LOGGER.debug('checking for compute instances')
             result = subprocess.run(
                 'gcloud compute instances list --format=json',
-                shell=True, stdout=subprocess.PIP).stdout
+                shell=True, stdout=subprocess.PIPE).stdout
             LOGGER.debug('raw output: ' + str(result))
             result = subprocess.run(
                 'gcloud compute instances list '
