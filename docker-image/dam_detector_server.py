@@ -26,7 +26,7 @@ logging.basicConfig(
         ' [%(funcName)s:%(lineno)d] %(message)s'),
     stream=sys.stdout)
 logging.getLogger('taskgraph').setLevel(logging.INFO)
-
+logging.getLogger('urllib3.connectionpool').setLevel(logging.INFO)
 QUADS_TO_PROCESS_PATH = 'quads_to_process.gpkg'
 LOGGER = logging.getLogger(__name__)
 
@@ -453,7 +453,6 @@ def client_monitor(client_key, update_interval=5.0, local_hosts=None):
                 '--filter="metadata.items.key=%s ' % client_key +
                 'AND status=RUNNING" --format=json',
                 shell=True, stdout=subprocess.PIPE).stdout
-            LOGGER.debug('result of instance list: %s' % result)
             live_workers = set()
             if local_hosts is not None:
                 live_workers.update([Worker(host) for host in local_hosts])
@@ -462,9 +461,7 @@ def client_monitor(client_key, update_interval=5.0, local_hosts=None):
                     network_ip = instance['networkInterfaces'][0][
                         'accessConfigs'][0]['natIP']
                 except Exception:
-                    LOGGER.info("couldn't find external address, try internal")
                     network_ip = instance['networkInterfaces'][0]['networkIP']
-                LOGGER.debug(f"{instance['name']} {network_ip}")
                 live_workers.add(Worker(network_ip))
 
             # rather than clear the set and reset it, we construct the set
@@ -475,7 +472,8 @@ def client_monitor(client_key, update_interval=5.0, local_hosts=None):
             # Remove any clients that are missing
             GLOBAL_WORKERS.intersection_update(live_workers)
             # Add in any clients that are new
-            LOGGER.debug('new workers: %s' % str(new_workers))
+            if new_workers:
+                LOGGER.debug('new workers: %s' % str(new_workers))
             GLOBAL_WORKERS.update(new_workers)
             LOGGER.debug('GLOBAL_WORKERS: %s' % str(GLOBAL_WORKERS))
             time.sleep(max(update_interval - (time.time() - start_time), 0))
